@@ -1,9 +1,13 @@
-"""İzin yönetim sistemi — tüm donanım erişimleri kullanıcı onayına tabidir."""
+"""İzin yönetim sistemi — tüm donanım erişimleri kullanıcı onayına tabidir.
+   Lokalde dosyaya, cloud'da belleğe kaydeder."""
 import json
 import os
 from pathlib import Path
 
+IS_CLOUD = os.environ.get("DEPLOY_MODE") == "cloud"
+
 PERMISSIONS_FILE = Path(__file__).parent.parent / "permissions.json"
+_memory_permissions: dict = {}  # cloud modunda dosya yerine bellek
 
 PERMISSION_DEFINITIONS = {
     "camera": {
@@ -23,12 +27,12 @@ PERMISSION_DEFINITIONS = {
     },
     "location": {
         "label": "Konum Erişimi",
-        "description": "Cihazın bulunduğu konumu tespit etmek için IP ve ağ bilgilerini kullanır.",
+        "description": "Cihazın bulunduğu konumu tespit etmek için GPS ve ağ bilgilerini kullanır.",
         "icon": "📍",
     },
     "storage": {
         "label": "Depolama Erişimi",
-        "description": "Dahili ve harici disklerdeki dosya yapısını ve kullanımını analiz etmeye izin verir.",
+        "description": "Tarayıcı depolama alanı ve sistem bilgilerini analiz etmeye izin verir.",
         "icon": "💾",
     },
 }
@@ -36,6 +40,8 @@ PERMISSION_DEFINITIONS = {
 
 def load_permissions():
     """Kaydedilmiş izinleri yükler."""
+    if IS_CLOUD:
+        return _memory_permissions
     if PERMISSIONS_FILE.exists():
         try:
             with open(PERMISSIONS_FILE, "r") as f:
@@ -46,7 +52,12 @@ def load_permissions():
 
 
 def save_permissions(permissions: dict):
-    """İzinleri dosyaya kaydeder."""
+    """İzinleri kaydeder."""
+    if IS_CLOUD:
+        global _memory_permissions
+        _memory_permissions.clear()
+        _memory_permissions.update(permissions)
+        return
     with open(PERMISSIONS_FILE, "w") as f:
         json.dump(permissions, f, indent=2)
 
