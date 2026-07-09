@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0a0e17">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>SecurityMonitor — Güvenlik Takip</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="logo">
+                <span class="logo-icon">🛡️</span>
+                <span class="logo-text">SecurityMonitor</span>
+            </div>
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-page="dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#" class="nav-item" data-page="camera">
+                    <span class="nav-icon">📷</span>
+                    <span>Kamera</span>
+                </a>
+                <a href="#" class="nav-item" data-page="audio">
+                    <span class="nav-icon">🎙️</span>
+                    <span>Ses</span>
+                </a>
+                <a href="#" class="nav-item" data-page="location">
+                    <span class="nav-icon">📍</span>
+                    <span>Konum</span>
+                </a>
+                <a href="#" class="nav-item" data-page="storage">
+                    <span class="nav-icon">💾</span>
+                    <span>Depolama</span>
+                </a>
+                <div class="nav-spacer"></div>
+                <a href="#" class="nav-item" data-page="permissions">
+                    <span class="nav-icon">🔐</span>
+                    <span>İzinler</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Ana İçerik -->
+        <main class="main-content" id="main-content">
+
+            <!-- Permission Gate -->
+            <div class="permission-gate" id="permissionGate">
+                <div class="gate-content">
+                    <div class="gate-icon">🛡️</div>
+                    <h1>SecurityMonitor</h1>
+                    <p class="gate-subtitle">Güvenlik Takip ve Donanım İzleme</p>
+                    <p class="gate-text">
+                        Bu uygulama aşağıdaki donanım bileşenlerine erişim gerektirir.
+                        Her bir izni ayrı ayrı yönetebilirsiniz. Hiçbir veri
+                        toplanmaz veya üçüncü taraflarla paylaşılmaz.
+                    </p>
+                    <div class="gate-permissions" id="gatePermissions"></div>
+                    <div class="gate-actions">
+                        <button class="btn btn-primary" id="gateAcceptBtn" disabled>
+                            Seçilen İzinleri Ver ve Başla
+                        </button>
+                        <button class="btn btn-ghost" id="gateRevokeAll">
+                            Tümünü Reddet
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sayfalar -->
+            <div class="page active" id="page-dashboard">
+                <div class="page-header">
+                    <h1>Dashboard</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" id="refreshAllBtn">
+                            🔄 Tümünü Tara
+                        </button>
+                    </div>
+                </div>
+                <div class="status-grid" id="statusGrid">
+                    <div class="status-card" data-module="camera">
+                        <div class="card-icon">📷</div>
+                        <div class="card-info">
+                            <h3>Kamera</h3>
+                            <p class="card-status">Kontrol ediliyor...</p>
+                        </div>
+                        <div class="card-indicator pending"></div>
+                    </div>
+                    <div class="status-card" data-module="audio">
+                        <div class="card-icon">🎙️</div>
+                        <div class="card-info">
+                            <h3>Ses</h3>
+                            <p class="card-status">Kontrol ediliyor...</p>
+                        </div>
+                        <div class="card-indicator pending"></div>
+                    </div>
+                    <div class="status-card" data-module="location">
+                        <div class="card-icon">📍</div>
+                        <div class="card-info">
+                            <h3>Konum</h3>
+                            <p class="card-status">Kontrol ediliyor...</p>
+                        </div>
+                        <div class="card-indicator pending"></div>
+                    </div>
+                    <div class="status-card" data-module="storage">
+                        <div class="card-icon">💾</div>
+                        <div class="card-info">
+                            <h3>Depolama</h3>
+                            <p class="card-status">Kontrol ediliyor...</p>
+                        </div>
+                        <div class="card-indicator pending"></div>
+                    </div>
+                    <div class="status-card" data-module="system">
+                        <div class="card-icon">🖥️</div>
+                        <div class="card-info">
+                            <h3>Sistem</h3>
+                            <p class="card-status">Kontrol ediliyor...</p>
+                        </div>
+                        <div class="card-indicator pending"></div>
+                    </div>
+                </div>
+                <div class="dashboard-detail" id="dashboardDetail"></div>
+            </div>
+
+            <div class="page" id="page-camera">
+                <div class="page-header">
+                    <h1>Kamera İzleme</h1>
+                    <button class="btn btn-secondary" id="scanCameraBtn">🔍 Kameraları Tara</button>
+                </div>
+                <div class="module-content" id="cameraContent">
+                    <p class="placeholder">Kamera izni verilmemiş. İzinler sayfasından kamera erişimini aktifleştirin.</p>
+                </div>
+            </div>
+
+            <div class="page" id="page-audio">
+                <div class="page-header">
+                    <h1>Ses İzleme</h1>
+                    <button class="btn btn-secondary" id="scanAudioBtn">🔍 Ses Donanımını Tara</button>
+                </div>
+                <div class="module-content" id="audioContent">
+                    <p class="placeholder">Ses izni verilmemiş.</p>
+                </div>
+            </div>
+
+            <div class="page" id="page-location">
+                <div class="page-header">
+                    <h1>Konum Takibi</h1>
+                    <button class="btn btn-secondary" id="scanLocationBtn">📍 Konumu Sorgula</button>
+                </div>
+                <div class="module-content" id="locationContent">
+                    <p class="placeholder">Konum izni verilmemiş.</p>
+                </div>
+            </div>
+
+            <div class="page" id="page-storage">
+                <div class="page-header">
+                    <h1>Depolama Analizi</h1>
+                    <button class="btn btn-secondary" id="scanStorageBtn">💾 Depolamayı Tara</button>
+                </div>
+                <div class="module-content" id="storageContent">
+                    <p class="placeholder">Depolama izni verilmemiş.</p>
+                </div>
+            </div>
+
+            <div class="page" id="page-permissions">
+                <div class="page-header">
+                    <h1>🔐 İzin Yönetimi</h1>
+                    <button class="btn btn-danger" id="revokeAllBtn">Tümünü İptal Et</button>
+                </div>
+                <p class="page-description">Her donanım bileşeni için erişim iznini ayrı ayrı yönetin.</p>
+                <div class="permissions-list" id="permissionsList"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js');
+        }
+    </script>
+</body>
+</html>
