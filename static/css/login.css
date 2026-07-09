@@ -1,0 +1,181 @@
+/* ============================================
+   SecurityMonitor — Login Page Styles
+   ============================================ */
+
+.login-body {
+    background: var(--bg-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+    overflow-y: auto;
+}
+
+.login-container {
+    width: 100%;
+    max-width: 420px;
+    padding: 40px 32px;
+}
+
+.login-header {
+    text-align: center;
+    margin-bottom: 36px;
+}
+
+.login-logo {
+    font-size: 56px;
+    margin-bottom: 12px;
+}
+
+.login-header h1 {
+    font-size: 26px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 6px;
+}
+
+.login-subtitle {
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+/* Google Section */
+.google-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.google-hint {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-top: 10px;
+}
+
+/* Divider */
+.login-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-muted);
+    font-size: 12px;
+    margin: 20px 0;
+}
+
+.login-divider::before,
+.login-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border-color);
+}
+
+/* Sections */
+.login-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 4px;
+}
+
+.login-section h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text-secondary);
+}
+
+.admin-section {
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.admin-section h3 {
+    color: var(--accent-red);
+}
+
+/* Form */
+.form-group {
+    margin-bottom: 12px;
+}
+
+.form-input {
+    width: 100%;
+    padding: 12px 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.form-input:focus {
+    border-color: var(--accent-blue);
+}
+
+.form-input::placeholder {
+    color: var(--text-muted);
+}
+
+.form-hint {
+    color: var(--text-muted);
+    font-size: 11px;
+    text-align: center;
+    margin-top: 8px;
+}
+
+/* Buttons */
+.btn-full {
+    width: 100%;
+    justify-content: center;
+}
+
+/* Error */
+.login-error {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid var(--accent-red);
+    color: var(--accent-red);
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-top: 16px;
+    text-align: center;
+}
+
+/* Loading */
+.login-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 16px;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+.login-loading.hidden,
+.login-error.hidden {
+    display: none;
+}
+
+/* Mobile */
+@media (max-width: 480px) {
+    .login-container {
+        padding: 24px 16px;
+    }
+    .login-logo {
+        font-size: 44px;
+    }
+    .login-header h1 {
+        font-size: 22px;
+    }
+    .login-section {
+        padding: 16px;
+    }
+}

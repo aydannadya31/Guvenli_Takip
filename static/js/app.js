@@ -6,6 +6,48 @@
 const IS_CLOUD = !['127.0.0.1', 'localhost', '::1'].includes(window.location.hostname);
 const API_BASE = '';
 
+// ============ AUTH KONTROL ============
+
+function getAuth() {
+    try {
+        const raw = localStorage.getItem('secmon_auth');
+        return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+}
+
+function requireAuth() {
+    const auth = getAuth();
+    if (!auth) {
+        window.location.href = '/login';
+        return null;
+    }
+    renderUserInfo();
+    return auth;
+}
+
+function logout() {
+    localStorage.removeItem('secmon_auth');
+    localStorage.removeItem('secmon_permissions');
+    window.location.href = '/login';
+}
+
+function renderUserInfo() {
+    const auth = getAuth();
+    if (!auth) return;
+    const avatarEl = document.getElementById('userAvatar');
+    const nameEl = document.getElementById('userName');
+    if (avatarEl) {
+        if (auth.photoURL) {
+            avatarEl.innerHTML = `<img src="${auth.photoURL}" alt="avatar" style="width:28px;height:28px;border-radius:50%;">`;
+        } else {
+            avatarEl.textContent = auth.name ? auth.name.charAt(0).toUpperCase() : '?';
+        }
+    }
+    if (nameEl) {
+        nameEl.textContent = auth.name || auth.email || 'Kullanıcı';
+    }
+}
+
 // ============ İZİN YÖNETİMİ (Cloud → localStorage, Lokal → Backend) ============
 
 function cloudGetPermissions() {
@@ -931,6 +973,9 @@ async function renderPermissionsPage() {
 // ============ BAŞLANGIÇ ============
 
 document.addEventListener('DOMContentLoaded', async () => {
+    // Auth kontrol
+    if (!requireAuth()) return;
+
     // Cloud modu badge
     if (IS_CLOUD) {
         const badge = document.createElement('div');
@@ -941,13 +986,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     initNavigation();
 
+    document.getElementById('logoutBtn')?.addEventListener('click', logout);
     document.getElementById('refreshAllBtn').addEventListener('click', refreshDashboard);
     document.getElementById('scanCameraBtn').addEventListener('click', scanCamera);
     document.getElementById('scanAudioBtn').addEventListener('click', scanAudio);
     document.getElementById('scanLocationBtn').addEventListener('click', scanLocation);
     document.getElementById('scanStorageBtn').addEventListener('click', scanStorage);
-
-    await initPermissionGate();
 
     document.querySelectorAll('.status-card').forEach(card => {
         card.addEventListener('click', () => {

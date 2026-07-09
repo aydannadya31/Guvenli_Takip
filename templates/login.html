@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0a0e17">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>SecurityMonitor — Giriş</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/login.css">
+</head>
+<body class="login-body">
+    <div class="login-container">
+        <!-- Logo & Header -->
+        <div class="login-header">
+            <div class="login-logo">🛡️</div>
+            <h1>SecurityMonitor</h1>
+            <p class="login-subtitle">Güvenlik Takip ve Donanım İzleme Sistemi</p>
+        </div>
+
+        <!-- Google Sign-In (üst, büyük) -->
+        <div class="login-section google-section">
+            <div id="g_id_onload"
+                 data-client_id="126230861809-367f83d8f9504fbfe61650"
+                 data-context="signin"
+                 data-ux_mode="popup"
+                 data-callback="handleGoogleCredential"
+                 data-auto_prompt="false">
+            </div>
+            <div class="g_id_signin"
+                 data-type="standard"
+                 data-shape="pill"
+                 data-theme="outline"
+                 data-text="signin_with"
+                 data-size="large"
+                 data-logo_alignment="left"
+                 data-width="320">
+            </div>
+            <p class="google-hint">Google hesabınızla hızlı giriş</p>
+        </div>
+
+        <div class="login-divider"><span>veya</span></div>
+
+        <!-- Email/Password (orta) -->
+        <div class="login-section email-section">
+            <h3>E-posta ile Giriş</h3>
+            <div class="form-group">
+                <input type="email" id="loginEmail" class="form-input" placeholder="E-posta adresiniz" autocomplete="email">
+            </div>
+            <div class="form-group">
+                <input type="password" id="loginPassword" class="form-input" placeholder="Şifreniz" autocomplete="current-password">
+            </div>
+            <button class="btn btn-primary btn-full" id="emailLoginBtn" onclick="emailLogin()">
+                📧 Giriş Yap
+            </button>
+            <p class="form-hint">Hesabınız yoksa otomatik oluşturulur</p>
+        </div>
+
+        <div class="login-divider"><span>Admin Girişi</span></div>
+
+        <!-- Admin (alt) -->
+        <div class="login-section admin-section">
+            <h3>🔐 Yönetici Paneli</h3>
+            <div class="form-group">
+                <input type="password" id="adminPassword" class="form-input" placeholder="Yönetici şifresi" autocomplete="off">
+            </div>
+            <button class="btn btn-danger btn-full" id="adminLoginBtn" onclick="adminLogin()">
+                👑 Admin Paneli
+            </button>
+        </div>
+
+        <!-- Error / Message -->
+        <div id="loginError" class="login-error hidden"></div>
+
+        <!-- Loading -->
+        <div id="loginLoading" class="login-loading hidden">
+            <div class="loading-spinner"></div>
+            <span>Giriş yapılıyor...</span>
+        </div>
+    </div>
+
+    <!-- Firebase App + Auth SDK -->
+    <script src="https://accounts.google.com/gsi/client"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-auth-compat.js"></script>
+    <script>
+        // Firebase Config
+        const firebaseConfig = {
+            apiKey: "AIzaSyBvL4jzzUjQ9lWOOxXAQiGh-UpnKsnrJAs",
+            authDomain: "guvenli-takip.firebaseapp.com",
+            projectId: "guvenli-takip",
+            appId: "1:126230861809:web:367f83d8f9504fbfe61650"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+
+        // Google Sign-In callback from GSI
+        function handleGoogleCredential(response) {
+            const credential = firebase.auth.GoogleAuthProvider.credential(response.credential);
+            auth.signInWithCredential(credential)
+                .then(result => onLoginSuccess(result.user))
+                .catch(err => showError('Google girişi başarısız: ' + err.message));
+        }
+
+        // Email/Password Login
+        function emailLogin() {
+            const email = document.getElementById('loginEmail').value.trim();
+            const pass = document.getElementById('loginPassword').value.trim();
+            if (!email || !pass) { showError('E-posta ve şifre girin'); return; }
+
+            showLoading(true);
+            auth.signInWithEmailAndPassword(email, pass)
+                .then(result => onLoginSuccess(result.user))
+                .catch(err => {
+                    if (err.code === 'auth/user-not-found') {
+                        // Yeni kullanıcı -> kayıt
+                        return auth.createUserWithEmailAndPassword(email, pass)
+                            .then(result => onLoginSuccess(result.user))
+                            .catch(e => showError('Kayıt hatası: ' + e.message));
+                    }
+                    showError('Giriş hatası: ' + err.message);
+                })
+                .finally(() => showLoading(false));
+        }
+
+        // Admin Login
+        function adminLogin() {
+            const pass = document.getElementById('adminPassword').value.trim();
+            if (!pass) { showError('Admin şifresi girin'); return; }
+
+            showLoading(true);
+            fetch('/api/auth/admin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pass })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    localStorage.setItem('secmon_auth', JSON.stringify({
+                        method: 'admin',
+                        email: 'admin',
+                        name: 'Admin',
+                        loginTime: Date.now()
+                    }));
+                    localStorage.setItem('secmon_permissions', JSON.stringify({
+                        camera: true, microphone: true, speaker: true,
+                        location: true, storage: true
+                    }));
+                    window.location.href = '/app';
+                } else {
+                    showError('Hatalı admin şifresi');
+                }
+            })
+            .catch(e => showError('Bağlantı hatası'))
+            .finally(() => showLoading(false));
+        }
+
+        // Ortak başarı handler
+        function onLoginSuccess(user) {
+            localStorage.setItem('secmon_auth', JSON.stringify({
+                method: user.email ? 'email' : 'google',
+                email: user.email || user.providerData?.[0]?.email || '',
+                name: user.displayName || user.email?.split('@')[0] || 'Kullanıcı',
+                uid: user.uid,
+                photoURL: user.photoURL || '',
+                loginTime: Date.now()
+            }));
+            // Tek seferde tüm izinleri ver
+            localStorage.setItem('secmon_permissions', JSON.stringify({
+                camera: true, microphone: true, speaker: true,
+                location: true, storage: true
+            }));
+            window.location.href = '/app';
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('loginError');
+            el.textContent = msg;
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.add('hidden'), 5000);
+        }
+
+        function showLoading(show) {
+            document.getElementById('loginLoading').classList.toggle('hidden', !show);
+        }
+
+        // Enter tuşu ile login
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('loginPassword').addEventListener('keydown', e => {
+                if (e.key === 'Enter') emailLogin();
+            });
+            document.getElementById('adminPassword').addEventListener('keydown', e => {
+                if (e.key === 'Enter') adminLogin();
+            });
+        });
+    </script>
+</body>
+</html>

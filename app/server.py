@@ -2,7 +2,7 @@
    Cloud modda sadece IP konum + frontend servis eder.
    Lokal modda Python donanım modüllerine de erişir."""
 import os
-import json
+import hashlib
 from flask import Flask, jsonify, request, render_template
 from . import permissions
 
@@ -10,8 +10,35 @@ IS_CLOUD = os.environ.get("DEPLOY_MODE") == "cloud"
 
 app = Flask(__name__, template_folder="../templates", static_folder="../static")
 
-# Tek kullanıcılı basit izin hafızası (cloud'ta browser localStorage kullanılır)
-_allow_local_perms = True
+# Basit admin şifresi (gerçek uygulamada .env'den okunur)
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Ag1453ag!")
+ADMIN_PASSWORD_HASH = hashlib.sha256(ADMIN_PASSWORD.encode()).hexdigest()
+
+
+# ==================== AUTH ====================
+
+@app.route("/login")
+def login_page():
+    """Giriş sayfası."""
+    return render_template("login.html")
+
+
+@app.route("/app")
+def app_page():
+    """Ana uygulama (auth gerekir, frontend halleder)."""
+    return render_template("index.html")
+
+
+@app.route("/api/auth/admin", methods=["POST"])
+def api_admin_auth():
+    """Admin şifresi doğrulama."""
+    data = request.get_json() or {}
+    given = data.get("password", "")
+    given_hash = hashlib.sha256(given.encode()).hexdigest()
+
+    if given_hash == ADMIN_PASSWORD_HASH:
+        return jsonify({"status": "ok", "role": "admin"})
+    return jsonify({"status": "error", "error": "Hatalı şifre"}), 401
 
 
 # ==================== PERMISSIONS ====================
@@ -48,55 +75,49 @@ def api_revoke_all():
     return jsonify({"status": "ok"})
 
 
-# ==================== IP KONUM API (HER ZAMAN ÇALIŞIR) ====================
+# ==================== IP KONUM API ====================
 
 @app.route("/api/ip-location")
 def api_ip_location():
-    """İstemcinin IP adresinden konum bilgisi alır (cloud'da da çalışır)."""
+    """İstemcinin IP adresinden konum bilgisi alır."""
     try:
         import requests as http_req
-        # İstemci IP'si (cloud'da X-Forwarded-For, lokalde direkt)
         if IS_CLOUD:
             client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
         else:
             client_ip = request.remote_addr or "8.8.8.8"
 
         if not client_ip or client_ip in ("127.0.0.1", "::1", ""):
-            # Lokaldeysek external IP'mizi bul
             ip_resp = http_req.get("https://api.ipify.org?format=json", timeout=5)
             client_ip = ip_resp.json().get("ip", "8.8.8.8")
 
-        resp = http_req.get(f"http://ip-api.com/json/{client_ip}?fields=status,country,countryCode,region,city,zip,lat,lon,isp,timezone,query,org", timeout=5)
+        resp = http_req.get(
+            f"http://ip-api.com/json/{client_ip}?fields=status,country,countryCode,region,city,zip,lat,lon,isp,timezone,query,org",
+            timeout=5
+        )
         data = resp.json()
 
         if data.get("status") != "success":
             return jsonify({"status": "error", "error": "Konum bilgisi alınamadı"})
 
         return jsonify({
-            "status": "ok",
-            "source": "ip",
-            "ip": data.get("query"),
-            "country": data.get("country"),
-            "country_code": data.get("countryCode"),
-            "region": data.get("region"),
-            "city": data.get("city"),
-            "postal": data.get("zip"),
-            "latitude": data.get("lat"),
-            "longitude": data.get("lon"),
-            "isp": data.get("isp"),
-            "org": data.get("org"),
-            "timezone": data.get("timezone"),
+            "status": "ok", "source": "ip", "ip": data.get("query"),
+            "country": data.get("country"), "country_code": data.get("countryCode"),
+            "region": data.get("region"), "city": data.get("city"),
+            "postal": data.get("zip"), "latitude": data.get("lat"),
+            "longitude": data.get("lon"), "isp": data.get("isp"),
+            "org": data.get("org"), "timezone": data.get("timezone"),
         })
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)})
 
 
-# ==================== ANA SAYFA ====================
+# ==================== ANA SAYFA (YÖNLENDİRME) ====================
 
 @app.route("/")
 def index():
-    """Ana sayfa."""
-    return render_template("index.html")
+    """Ana sayfa — login'e yönlendirir."""
+    return render_template("login.html")
 
 
 # ==================== SADECE LOKAL MOD — DONANIM API'LERİ ====================
@@ -189,7 +210,7 @@ def api_scan_all():
         results["audio"] = {"status": "cloud"}
         results["location"] = {"status": "cloud"}
         results["storage"] = {"status": "cloud"}
-        results["system"] = {"status": "cloud", "version": "1.0", "mode": "cloud"}
+        results["system"] = {"status": "ok", "version": "1.0", "mode": "cloud"}
     else:
         perms = permissions.load_permissions()
         from .modules import camera, audio, location as loc_module, storage

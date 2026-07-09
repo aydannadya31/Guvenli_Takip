@@ -46,35 +46,19 @@
                     <span class="nav-icon">🔐</span>
                     <span>İzinler</span>
                 </a>
+                <a href="#" class="nav-item" id="logoutBtn" style="color:var(--accent-red);">
+                    <span class="nav-icon">🚪</span>
+                    <span>Çıkış</span>
+                </a>
             </nav>
+            <div class="user-info" id="userInfo">
+                <div class="user-avatar" id="userAvatar"></div>
+                <div class="user-name" id="userName"></div>
+            </div>
         </aside>
 
         <!-- Ana İçerik -->
         <main class="main-content" id="main-content">
-
-            <!-- Permission Gate -->
-            <div class="permission-gate" id="permissionGate">
-                <div class="gate-content">
-                    <div class="gate-icon">🛡️</div>
-                    <h1>SecurityMonitor</h1>
-                    <p class="gate-subtitle">Güvenlik Takip ve Donanım İzleme</p>
-                    <p class="gate-text">
-                        Bu uygulama aşağıdaki donanım bileşenlerine erişim gerektirir.
-                        Her bir izni ayrı ayrı yönetebilirsiniz. Hiçbir veri
-                        toplanmaz veya üçüncü taraflarla paylaşılmaz.
-                    </p>
-                    <div class="gate-permissions" id="gatePermissions"></div>
-                    <div class="gate-actions">
-                        <button class="btn btn-primary" id="gateAcceptBtn" disabled>
-                            Seçilen İzinleri Ver ve Başla
-                        </button>
-                        <button class="btn btn-ghost" id="gateRevokeAll">
-                            Tümünü Reddet
-                        </button>
-                    </div>
-                </div>
-            </div>
-
             <!-- Sayfalar -->
             <div class="page active" id="page-dashboard">
                 <div class="page-header">
