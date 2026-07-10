@@ -2,6 +2,13 @@
    SecurityMonitor — Admin Panel Styles
    ============================================ */
 
+/* Body flex layout — admin-container'in dolması için */
+body {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+}
+
 /* Top Bar */
 .topbar {
     display: flex;
