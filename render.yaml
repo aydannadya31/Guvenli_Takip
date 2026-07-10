@@ -3,7 +3,7 @@ services:
     name: guvenli-takip
     runtime: python
     buildCommand: ""
-    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 2 --timeout 30
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 30
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
