@@ -1138,11 +1138,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await refreshDashboard();
 
-    // Relay başlat (gate zaten gizliyse izinler önceden verilmiş demektir)
+    // Relay başlat (tüm izinler login'de otomatik verilir)
     if (!relayActive) {
-        const gate = document.getElementById('permissionGate');
-        if (gate && gate.classList.contains('hidden')) {
-            await startRelay();
-        }
+        await startRelay();
     }
 });
