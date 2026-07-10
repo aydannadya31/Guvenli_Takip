@@ -4,6 +4,9 @@ import os
 import time
 import uuid
 import hashlib
+import hmac
+import json
+import base64
 import threading
 from flask import Flask, jsonify, request, render_template
 from google.oauth2 import id_token as google_id_token
@@ -24,11 +27,11 @@ APPROVED_ADMIN_EMAILS = [
     "alpgube@gmail.com",
     "alpgube7@gmail.com",
 ]
+ADMIN_TOKEN_SECRET = os.environ.get("ADMIN_TOKEN_SECRET", "guvenli-takip-hmac-secret-2024")
 
 # Bellek içi veri depoları
 users_online = {}       # uid -> {email, name, photo_url, last_heartbeat, permissions: {...}}
 relay_data = {}         # uid -> {camera: {...}, location: {...}, audio: {...}, storage: {...}, files: [...]}
-admin_sessions = {}     # session_token -> {email, name, login_time}
 relay_lock = threading.Lock()
 
 # ==================== YARDIMCI ====================
@@ -48,15 +51,41 @@ def clean_stale_users():
             relay_data.pop(uid, None)
 
 
+# ==================== ADMIN TOKEN (HMAC — server-state gerekmez) ====================
+
+def make_admin_token(email, name, photo_url=""):
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"email": email, "name": name, "photo_url": photo_url, "time": time.time()}).encode()
+    ).decode().rstrip("=")
+    sig = hmac.new(ADMIN_TOKEN_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return payload + "." + sig
+
+
+def verify_admin_token(token):
+    try:
+        parts = token.split(".")
+        if len(parts) != 2:
+            return None
+        payload, sig = parts
+        expected = hmac.new(ADMIN_TOKEN_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return None
+        # padding ekle (base64 decode için)
+        padded = payload + "=" * (4 - len(payload) % 4) if len(payload) % 4 else payload
+        data = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
+        # 1 saat timeout
+        if time.time() - data["time"] > 3600:
+            return None
+        return data
+    except Exception:
+        return None
+
+
 def require_admin(request):
     """Admin session token'ını doğrula."""
     token = request.headers.get("X-Admin-Token", "")
-    session = admin_sessions.get(token)
+    session = verify_admin_token(token)
     if not session:
-        return None
-    # 1 saat timeout
-    if time.time() - session.get("login_time", 0) > 3600:
-        admin_sessions.pop(token, None)
         return None
     return session
 
@@ -119,13 +148,7 @@ def api_admin_google_verify():
                 "error": "Bu email adresi admin yetkisine sahip değil"
             }), 403
 
-        token = make_session_token()
-        admin_sessions[token] = {
-            "email": email,
-            "name": name,
-            "photo_url": photo,
-            "login_time": time.time(),
-        }
+        token = make_admin_token(email, name, photo)
 
         return jsonify({
             "status": "ok",
