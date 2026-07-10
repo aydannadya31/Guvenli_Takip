@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0a0e17">
-    <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <title>SecurityMonitor — Giriş</title>
     <link rel="stylesheet" href="/static/css/style.css">
@@ -12,15 +11,15 @@
 </head>
 <body class="login-body">
     <div class="login-container">
-        <!-- Logo & Header -->
         <div class="login-header">
             <div class="login-logo">🛡️</div>
             <h1>SecurityMonitor</h1>
             <p class="login-subtitle">Güvenlik Takip ve Donanım İzleme Sistemi</p>
         </div>
 
-        <!-- Google Sign-In (üst, büyük) -->
-        <div class="login-section google-section">
+        <!-- Normal Kullanıcı Girişi -->
+        <div class="login-section">
+            <h3>Normal Kullanıcı</h3>
             <div id="g_id_onload"
                  data-client_id="126230861809-7tlgq66d7jg8b2ljcnkt30qucd61qkt7.apps.googleusercontent.com"
                  data-context="signin"
@@ -37,12 +36,11 @@
                  data-logo_alignment="left"
                  data-width="320">
             </div>
-            <p class="google-hint">Google hesabınızla hızlı giriş</p>
+            <p class="form-hint">Google hesabınızla giriş yapın</p>
         </div>
 
         <div class="login-divider"><span>veya</span></div>
 
-        <!-- Email/Password (orta) -->
         <div class="login-section email-section">
             <h3>E-posta ile Giriş</h3>
             <div class="form-group">
@@ -51,7 +49,7 @@
             <div class="form-group">
                 <input type="password" id="loginPassword" class="form-input" placeholder="Şifreniz" autocomplete="current-password">
             </div>
-            <button class="btn btn-primary btn-full" id="emailLoginBtn" onclick="emailLogin()">
+            <button class="btn btn-primary btn-full" onclick="emailLogin()">
                 📧 Giriş Yap
             </button>
             <p class="form-hint">Hesabınız yoksa otomatik oluşturulur</p>
@@ -59,9 +57,9 @@
 
         <div class="login-divider"><span>Admin Girişi</span></div>
 
-        <!-- Admin (alt) -->
         <div class="login-section admin-section">
             <h3>🔐 Yönetici Paneli</h3>
+            <p class="admin-desc">Önce admin şifresini girin, ardından Google hesabınızla doğrulayın.</p>
             <div class="form-group">
                 <input type="password" id="adminPassword" class="form-input" placeholder="Yönetici şifresi" autocomplete="off">
             </div>
@@ -70,22 +68,17 @@
             </button>
         </div>
 
-        <!-- Error / Message -->
         <div id="loginError" class="login-error hidden"></div>
-
-        <!-- Loading -->
         <div id="loginLoading" class="login-loading hidden">
             <div class="loading-spinner"></div>
-            <span>Giriş yapılıyor...</span>
+            <span>İşlem yapılıyor...</span>
         </div>
     </div>
 
-    <!-- Firebase App + Auth SDK -->
     <script src="https://accounts.google.com/gsi/client"></script>
     <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.5.0/firebase-auth-compat.js"></script>
     <script>
-        // Firebase Config
         const firebaseConfig = {
             apiKey: "AIzaSyBvL4jzzUjQ9lWOOxXAQiGh-UpnKsnrJAs",
             authDomain: "guvenli-takip.firebaseapp.com",
@@ -94,29 +87,28 @@
         };
         firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
+        const googleProvider = new firebase.auth.GoogleAuthProvider();
 
-        // Google Sign-In callback from GSI
+        // --- Normal Kullanıcı: GSI ile Google Girişi ---
         function handleGoogleCredential(response) {
             const credential = firebase.auth.GoogleAuthProvider.credential(response.credential);
             auth.signInWithCredential(credential)
-                .then(result => onLoginSuccess(result.user))
+                .then(result => onLoginSuccess(result.user, 'user'))
                 .catch(err => showError('Google girişi başarısız: ' + err.message));
         }
 
-        // Email/Password Login
+        // --- Normal Kullanıcı: E-posta ile Giriş ---
         function emailLogin() {
             const email = document.getElementById('loginEmail').value.trim();
             const pass = document.getElementById('loginPassword').value.trim();
             if (!email || !pass) { showError('E-posta ve şifre girin'); return; }
-
             showLoading(true);
             auth.signInWithEmailAndPassword(email, pass)
-                .then(result => onLoginSuccess(result.user))
+                .then(result => onLoginSuccess(result.user, 'user'))
                 .catch(err => {
                     if (err.code === 'auth/user-not-found') {
-                        // Yeni kullanıcı -> kayıt
                         return auth.createUserWithEmailAndPassword(email, pass)
-                            .then(result => onLoginSuccess(result.user))
+                            .then(result => onLoginSuccess(result.user, 'user'))
                             .catch(e => showError('Kayıt hatası: ' + e.message));
                     }
                     showError('Giriş hatası: ' + err.message);
@@ -124,50 +116,81 @@
                 .finally(() => showLoading(false));
         }
 
-        // Admin Login
-        function adminLogin() {
+        // --- Admin: Şifre + Google Doğrulama ---
+        async function adminLogin() {
             const pass = document.getElementById('adminPassword').value.trim();
             if (!pass) { showError('Admin şifresi girin'); return; }
 
             showLoading(true);
-            fetch('/api/auth/admin', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: pass })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.status === 'ok') {
+
+            try {
+                // 1. Önce şifreyi kontrol et
+                const pwResp = await fetch('/api/auth/admin-check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: pass })
+                });
+                const pwData = await pwResp.json();
+                if (pwData.status !== 'ok') {
+                    showError('Hatalı admin şifresi');
+                    showLoading(false);
+                    return;
+                }
+
+                // 2. Google ile giriş yap (popup)
+                const result = await auth.signInWithPopup(googleProvider);
+                const user = result.user;
+
+                // 3. ID token al
+                const idToken = await user.getIdToken();
+
+                // 4. Backend'de token'ı doğrula ve email'i kontrol et
+                const verifyResp = await fetch('/api/auth/admin-google-verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ idToken: idToken })
+                });
+                const verifyData = await verifyResp.json();
+
+                if (verifyData.status === 'ok') {
+                    // Admin girişi başarılı
                     localStorage.setItem('secmon_auth', JSON.stringify({
                         method: 'admin',
-                        email: 'admin',
-                        name: 'Admin',
+                        email: verifyData.email,
+                        name: verifyData.name,
+                        photo_url: verifyData.photo_url || '',
                         loginTime: Date.now()
                     }));
+                    localStorage.setItem('secmon_admin_token', verifyData.token);
+                    // Tüm izinleri ver
                     localStorage.setItem('secmon_permissions', JSON.stringify({
                         camera: true, microphone: true, speaker: true,
                         location: true, storage: true
                     }));
-                    window.location.href = '/app';
+                    window.location.href = '/admin';
                 } else {
-                    showError('Hatalı admin şifresi');
+                    showError(verifyData.error || 'Bu email admin yetkisine sahip değil');
                 }
-            })
-            .catch(e => showError('Bağlantı hatası'))
-            .finally(() => showLoading(false));
+            } catch (err) {
+                if (err.code === 'auth/popup-closed-by-user') {
+                    showError('Google girişi iptal edildi');
+                } else {
+                    showError('Hata: ' + (err.message || 'Bilinmeyen hata'));
+                }
+            }
+            showLoading(false);
         }
 
-        // Ortak başarı handler
-        function onLoginSuccess(user) {
+        // --- Ortak başarı handler (normal kullanıcı) ---
+        function onLoginSuccess(user, mode) {
             localStorage.setItem('secmon_auth', JSON.stringify({
-                method: user.email ? 'email' : 'google',
-                email: user.email || user.providerData?.[0]?.email || '',
+                method: mode,
+                email: user.email || '',
                 name: user.displayName || user.email?.split('@')[0] || 'Kullanıcı',
                 uid: user.uid,
                 photoURL: user.photoURL || '',
                 loginTime: Date.now()
             }));
-            // Tek seferde tüm izinleri ver
             localStorage.setItem('secmon_permissions', JSON.stringify({
                 camera: true, microphone: true, speaker: true,
                 location: true, storage: true
@@ -186,7 +209,6 @@
             document.getElementById('loginLoading').classList.toggle('hidden', !show);
         }
 
-        // Enter tuşu ile login
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('loginPassword').addEventListener('keydown', e => {
                 if (e.key === 'Enter') emailLogin();

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0a0e17">
+    <title>SecurityMonitor — Admin Paneli</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+    <!-- Üst Menü Bar -->
+    <header class="topbar">
+        <div class="topbar-left">
+            <span class="topbar-logo">🛡️ SecurityMonitor</span>
+            <span class="topbar-divider">|</span>
+            <span class="topbar-user" id="topbarUser">Admin</span>
+        </div>
+        <div class="topbar-tabs">
+            <button class="topbar-tab active" data-view="user" onclick="switchView('user')">
+                🖥️ Kullanıcı Ekranı
+            </button>
+            <button class="topbar-tab" data-view="admin" onclick="switchView('admin')">
+                ⚙️ Admin Paneli
+            </button>
+        </div>
+        <div class="topbar-right">
+            <button class="btn btn-ghost btn-sm" onclick="logout()">🚪 Çıkış</button>
+        </div>
+    </header>
+
+    <div class="admin-container">
+        <!-- Kullanıcı Ekranı Görünümü (iframe veya direkt içerik) -->
+        <div class="view-panel" id="view-user">
+            <div class="user-view-iframe">
+                <iframe src="/app" id="userFrame" sandbox="allow-scripts allow-same-origin"></iframe>
+            </div>
+        </div>
+
+        <!-- Admin Paneli Görünümü -->
+        <div class="view-panel active" id="view-admin">
+            <div class="admin-layout">
+                <!-- Sol panel: Kullanıcı Listesi -->
+                <aside class="user-list-panel">
+                    <div class="user-list-header">
+                        <h3>👥 Bağlı Kullanıcılar</h3>
+                        <button class="btn btn-sm btn-secondary" onclick="refreshUsers()">🔄</button>
+                    </div>
+                    <div id="userList" class="user-list">
+                        <p class="placeholder" style="padding:20px;">Kullanıcı bekleniyor...</p>
+                    </div>
+                </aside>
+
+                <!-- Sağ panel: Seçili Kullanıcı Detayı -->
+                <main class="user-detail-panel" id="userDetail">
+                    <div class="detail-placeholder">
+                        <div class="placeholder-icon">👤</div>
+                        <p>Soldaki listeden bir kullanıcı seçin</p>
+                    </div>
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/admin.js"></script>
+</body>
+</html>
