@@ -141,8 +141,8 @@
                 const result = await auth.signInWithPopup(googleProvider);
                 const user = result.user;
 
-                // 3. ID token al
-                const idToken = await user.getIdToken();
+                // 3. Google OAuth ID token'ı al (Firebase token'ı değil!)
+                const idToken = result.credential.idToken;
 
                 // 4. Backend'de token'ı doğrula ve email'i kontrol et
                 const verifyResp = await fetch('/api/auth/admin-google-verify', {
