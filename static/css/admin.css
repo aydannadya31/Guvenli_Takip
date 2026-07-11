@@ -7,6 +7,12 @@ body {
     display: flex;
     flex-direction: column;
     margin: 0;
+    min-height: 100vh;
+    height: 100vh;
+}
+
+html {
+    height: 100%;
 }
 
 /* Top Bar */
@@ -110,6 +116,7 @@ body {
     display: flex;
     flex: 1;
     overflow: hidden;
+    height: 100%;
 }
 
 /* User List Panel */
