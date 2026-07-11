@@ -191,9 +191,9 @@ function renderUserDetail(container, data) {
                 </div>
                 <div id="adminAudioLevel" style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Ses bekleniyor...</div>
                 <div class="audio-controls">
-                    <span class="live-indicator live" style="margin:0;"><span class="dot"></span> Otomatik dinleme aktif</span>
+                    <button class="btn btn-secondary btn-sm" id="btnToggleListen" onclick="toggleAudioListening()">🔊 Dinle</button>
                     <button class="btn btn-secondary btn-sm" onclick="recordAudioClip()">⏺️ Ses Kaydı Al</button>
-                    <button class="btn btn-secondary btn-sm" onclick="sendAudioToUser()">📤 Ses Gönder (Admin→Kullanıcı)</button>
+                    <button class="btn btn-secondary btn-sm" onclick="sendAudioToUser()">📤 Ses Gönder</button>
                 </div>
                 <div id="audioStatus" style="font-size:11px;color:var(--text-muted);margin-top:8px;"></div>
             </div>
@@ -375,7 +375,7 @@ function updateAudioView(audioData) {
 
     level.textContent = `Ses seviyesi: %${Math.round(avgLevel)} ${audioData.has_signal ? '🔊 Sinyal var' : '🔇 Sessiz'}`;
 
-    if (audioData.clip && audioData.clip.length > 100) {
+    if (_audioListening && audioData.clip && audioData.clip.length > 100) {
         try {
             const audio = new Audio(`data:audio/webm;base64,${audioData.clip}`);
             audio.volume = 0.8;
@@ -384,9 +384,30 @@ function updateAudioView(audioData) {
     }
 }
 
+let _audioListening = false;
+
+function toggleAudioListening() {
+    if (_audioListening) {
+        stopAudioListening();
+    } else {
+        startAudioListening();
+    }
+}
+
 async function startAudioListening() {
+    _audioListening = true;
+    const btn = document.getElementById('btnToggleListen');
+    if (btn) { btn.textContent = '⏹️ Durdur'; btn.style.background = 'var(--accent-red)'; }
     const status = document.getElementById('audioStatus');
-    if (status) status.textContent = '✅ Otomatik dinleme zaten aktif';
+    if (status) status.textContent = '🔊 Ses dinleniyor...';
+}
+
+function stopAudioListening() {
+    _audioListening = false;
+    const btn = document.getElementById('btnToggleListen');
+    if (btn) { btn.textContent = '🔊 Dinle'; btn.style.background = ''; }
+    const status = document.getElementById('audioStatus');
+    if (status) status.textContent = '⏸️ Dinleme durduruldu';
 }
 
 async function recordAudioClip() {
