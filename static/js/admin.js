@@ -475,12 +475,11 @@ function updateLocationView(locData) {
     const lat = locData.latitude;
     const lng = locData.longitude;
 
-    // Google Maps embed
     mapDiv.innerHTML = `
         <iframe
             width="100%" height="100%"
             frameborder="0" style="border:0"
-            src="https://www.google.com/maps/embed/v1/place?key=AIzaSyBvL4jzzUjQ9lWOOxXAQiGh-UpnKsnrJAs&q=${lat},${lng}&zoom=15"
+            src="https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.005},${lat-0.005},${lng+0.005},${lat+0.005}&layer=mapnik&marker=${lat},${lng}"
             allowfullscreen>
         </iframe>
     `;
