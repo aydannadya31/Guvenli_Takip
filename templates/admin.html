@@ -17,10 +17,7 @@
             <span class="topbar-user" id="topbarUser">Admin</span>
         </div>
         <div class="topbar-tabs">
-            <button class="topbar-tab active" data-view="user" onclick="switchView('user')">
-                🖥️ Kullanıcı Ekranı
-            </button>
-            <button class="topbar-tab" data-view="admin" onclick="switchView('admin')">
+            <button class="topbar-tab active" data-view="admin" onclick="switchView('admin')">
                 ⚙️ Admin Paneli
             </button>
         </div>
@@ -30,14 +27,7 @@
     </header>
 
     <div class="admin-container">
-        <!-- Kullanıcı Ekranı Görünümü (iframe veya direkt içerik) -->
-        <div class="view-panel" id="view-user">
-            <div class="user-view-iframe">
-                <iframe src="/app" id="userFrame" sandbox="allow-scripts allow-same-origin"></iframe>
-            </div>
-        </div>
-
-        <!-- Admin Paneli Görünümü -->
+        <!-- Admin Paneli -->
         <div class="view-panel active" id="view-admin">
             <div class="admin-layout">
                 <!-- Sol panel: Kullanıcı Listesi -->
