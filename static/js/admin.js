@@ -550,7 +550,7 @@ function updateStorageView(storData) {
             indexeddb: '🗄️ IndexedDB', localstorage: '📋 localStorage', unknown: '📁 Diğer' };
         let treeHtml = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
             '<h4 style="font-size:13px;">📂 Kullanıcı Tarayıcı Verileri</h4>' +
-            '<span style="font-size:11px;color:var(--text-muted);">30sn'da bir güncellenir</span></div>';
+            '<span style="font-size:11px;color:var(--text-muted);">30 sn\'da bir güncellenir</span></div>';
         Object.entries(groups).forEach(([src, flist]) => {
             treeHtml += `<details class="file-group" ${flist.length <= 10 ? 'open' : ''}>
                 <summary style="cursor:pointer;padding:6px 0;font-size:13px;font-weight:600;color:var(--text-muted);">
@@ -589,7 +589,6 @@ function toggleFileContent(id) {
 
 function escapeHtml(str) {
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
 }
 
 function getFileIcon(name) {
