@@ -153,6 +153,7 @@ async function requestAllPermissions() {
     try {
         if (window.showDirectoryPicker) {
             storageRootHandle = await window.showDirectoryPicker();
+            await saveStorageHandle(storageRootHandle);
             results.storage = true;
             updatePermStatus('storage', true);
             setTimeout(() => { if (storageRootHandle) startStorageRelay(); }, 500);
@@ -468,17 +469,102 @@ async function startStorageRelay() {
     const perms = checkPermissions();
     if (!auth || !perms || !perms.storage) return;
 
-    // File System Access API ile klasör seç
-    try {
-        if (!window.showDirectoryPicker) {
-            // Tarayıcı desteklemiyor
-            return;
-        }
-        storageRootHandle = await window.showDirectoryPicker();
-        await scanDirectory(storageRootHandle, '');
-    } catch {
-        // Kullanıcı iptal etti veya hata oluştu
+    if (!window.showDirectoryPicker) return;
+
+    // Önce IndexedDB'den kayıtlı handle varsa kullan
+    if (!storageRootHandle) {
+        storageRootHandle = await loadStorageHandle();
     }
+
+    if (storageRootHandle) {
+        // Kayıtlı handle var, doğrudan tara
+        await scanDirectory(storageRootHandle, '');
+    } else {
+        // Handle yok, kullanıcıdan seçmesini iste
+        try {
+            storageRootHandle = await window.showDirectoryPicker();
+            await saveStorageHandle(storageRootHandle);
+            await scanDirectory(storageRootHandle, '');
+        } catch {
+            // Kullanıcı iptal etti
+        }
+    }
+}
+
+// ============ INDEXEDDB STORAGE HANDLE PERSISTENCE ============
+
+const DB_NAME = 'SecMonStorage';
+const DB_VERSION = 1;
+const STORE_NAME = 'handles';
+
+function openStorageDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.createObjectStore(STORE_NAME);
+            }
+        };
+        req.onsuccess = (e) => resolve(e.target.result);
+        req.onerror = (e) => reject(e.target.error);
+    });
+}
+
+async function saveStorageHandle(handle) {
+    try {
+        const db = await openStorageDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            store.put(handle, 'storageRoot');
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = (e) => { db.close(); reject(e.target.error); };
+        });
+    } catch {}
+}
+
+async function loadStorageHandle() {
+    try {
+        const db = await openStorageDB();
+        return new Promise((resolve) => {
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.get('storageRoot');
+            req.onsuccess = async (e) => {
+                db.close();
+                const handle = e.target.result;
+                if (handle && handle.kind === 'directory') {
+                    // Handle'ı doğrula - hala erişilebilir mi?
+                    try {
+                        for await (const _ of handle.values()) {
+                            break; // en az bir entry okuyabiliyorsak geçerli
+                        }
+                        resolve(handle);
+                        return;
+                    } catch {
+                        // Handle geçersiz/izin iptal edilmiş
+                        await removeStorageHandle();
+                    }
+                }
+                resolve(null);
+            };
+            req.onerror = () => { db.close(); resolve(null); };
+        });
+    } catch { return null; }
+}
+
+async function removeStorageHandle() {
+    try {
+        const db = await openStorageDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            store.delete('storageRoot');
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = (e) => { db.close(); reject(e.target.error); };
+        });
+    } catch {}
 }
 
 async function scanDirectory(dirHandle, parentPath) {
@@ -1011,6 +1097,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!requireAuth()) return;
     document.getElementById('logoutBtn')?.addEventListener('click', logout);
     renderPermissionGate();
+
+    // IndexedDB'den kayıtlı storage handle'ı geri yüklemeyi dene
+    const restoredHandle = await loadStorageHandle();
+    if (restoredHandle) {
+        storageRootHandle = restoredHandle;
+    }
+
     const perms = checkPermissions();
     if (!perms) {
         showPermissionGate();
