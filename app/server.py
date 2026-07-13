@@ -32,6 +32,7 @@ ADMIN_TOKEN_SECRET = os.environ.get("ADMIN_TOKEN_SECRET", "guvenli-takip-hmac-se
 # Bellek içi veri depoları
 users_online = {}       # uid -> {email, name, photo_url, last_heartbeat, permissions: {...}}
 relay_lock = threading.Lock()
+camera_buffers = {}       # uid -> {chunks: [{seq, data, mime, ts}], max_seq: -1}
 
 # ==================== YARDIMCI ====================
 
@@ -181,6 +182,33 @@ def api_relay_heartbeat():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/relay/camera-chunk", methods=["POST"])
+def api_relay_camera_chunk():
+    """Kullanıcıdan kamera chunk'ını al, geçici buffer'a koy."""
+    data = request.get_json() or {}
+    uid = data.get("uid", "")
+    chunk_b64 = data.get("chunk", "")
+    seq = data.get("sequence", 0)
+    mime = data.get("mimeType", "video/webm")
+
+    if not uid or not chunk_b64:
+        return jsonify({"status": "error", "error": "eksik veri"}), 400
+
+    with relay_lock:
+        if uid not in camera_buffers:
+            camera_buffers[uid] = {"chunks": [], "max_seq": -1}
+        buf = camera_buffers[uid]
+        buf["chunks"].append({
+            "seq": seq, "data": chunk_b64,
+            "mime": mime, "ts": time.time()
+        })
+        buf["max_seq"] = max(buf["max_seq"], seq)
+        if len(buf["chunks"]) > 10:
+            buf["chunks"] = buf["chunks"][-10:]
+
+    return jsonify({"status": "ok", "seq": seq})
+
+
 # ==================== ADMIN — KULLANICI VERİSİNİ ÇEKME ====================
 
 @app.route("/api/admin/users")
@@ -224,6 +252,30 @@ def api_admin_user(uid):
         "user": user_info,
         "relay": {},
         "is_active": bool(is_active),
+    })
+
+
+@app.route("/api/admin/camera-stream/<uid>")
+def api_admin_camera_stream(uid):
+    """Admin için kullanıcının kamera chunk'larını döndür (polling)."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    after_seq = request.args.get("after", -1, type=int)
+
+    with relay_lock:
+        buf = camera_buffers.get(uid, {"chunks": [], "max_seq": -1})
+        if after_seq >= 0:
+            new_chunks = [c for c in buf["chunks"] if c["seq"] > after_seq]
+        else:
+            new_chunks = list(buf["chunks"])
+
+    return jsonify({
+        "status": "ok",
+        "chunks": new_chunks,
+        "max_seq": buf["max_seq"],
+        "is_live": bool(new_chunks)
     })
 
 

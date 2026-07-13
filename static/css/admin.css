@@ -297,6 +297,169 @@ html {
     border: 1px solid var(--border-color);
 }
 
+/* ============ MODULE TABS ============ */
+.module-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0;
+}
+
+.module-tab {
+    padding: 10px 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    margin-bottom: -1px;
+}
+
+.module-tab:hover {
+    color: var(--text-primary);
+    background: var(--bg-card);
+}
+
+.module-tab.active {
+    color: var(--accent-cyan);
+    border-bottom-color: var(--accent-cyan);
+}
+
+.module-tab.disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.module-tab.disabled:hover {
+    background: transparent;
+    color: var(--text-secondary);
+}
+
+.module-content {
+    flex: 1;
+}
+
+/* ============ CAMERA VIEWER ============ */
+.camera-viewer {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.camera-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 8px;
+}
+
+.camera-status {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+.camera-display {
+    position: relative;
+    background: #000;
+    border-radius: 10px;
+    overflow: hidden;
+    aspect-ratio: 4/3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.camera-video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.camera-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--text-muted);
+    background: var(--bg-input);
+}
+
+.camera-placeholder-icon {
+    font-size: 48px;
+    opacity: 0.4;
+    font-weight: 700;
+}
+
+.camera-placeholder p {
+    font-size: 14px;
+    opacity: 0.6;
+}
+
+/* ============ SNAPSHOT GALLERY ============ */
+.snapshot-gallery {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 8px 0;
+}
+
+.snapshot-item {
+    flex-shrink: 0;
+    width: 140px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+}
+
+.snapshot-item img {
+    width: 100%;
+    height: 80px;
+    object-fit: cover;
+    display: block;
+}
+
+.snapshot-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+}
+
+.snapshot-time {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.snapshot-dl {
+    font-size: 10px;
+    padding: 2px 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.snapshot-dl:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .user-list-panel { width: 180px; }
@@ -304,4 +467,8 @@ html {
     .user-list-panel { width: 100%; height: auto; max-height: 200px; }
     .topbar { flex-wrap: wrap; height: auto; gap: 6px; padding: 6px 10px; }
     .topbar-tab { font-size: 11px; padding: 6px 10px; }
+    .module-tab { font-size: 11px; padding: 8px 10px; }
+    .camera-display { aspect-ratio: 4/3; }
+    .snapshot-item { width: 100px; }
+    .snapshot-item img { height: 60px; }
 }
