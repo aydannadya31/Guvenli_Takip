@@ -233,6 +233,121 @@ function stopCameraRelay() {
     cameraRecorder = null;
 }
 
+// ============ AUDIO RELAY (Mikrofon) ============
+
+let audioRecorder = null;
+let audioStream = null;
+let audioSequence = 0;
+let audioRelayActive = false;
+let incomingAudioSeq = -1;
+let incomingAudioTimer = null;
+
+async function startAudioRelay() {
+    const auth = getAuth();
+    const perms = checkPermissions();
+    if (!auth || !perms || !perms.microphone || audioRelayActive) return;
+
+    try {
+        audioStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true }
+        });
+
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus' : 'audio/webm';
+
+        audioRecorder = new MediaRecorder(audioStream, { mimeType });
+        audioRelayActive = true;
+
+        audioRecorder.ondataavailable = async (event) => {
+            if (!event.data || event.data.size === 0) return;
+            const reader = new FileReader();
+            reader.onload = async () => {
+                try {
+                    const b64 = reader.result.split(',')[1];
+                    await fetch(`${API_BASE}/api/relay/audio-chunk`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            uid: auth.uid,
+                            chunk: b64,
+                            sequence: audioSequence++,
+                            mimeType: mimeType
+                        })
+                    });
+                } catch {}
+            };
+            reader.readAsDataURL(event.data);
+        };
+
+        audioRecorder.start(1000); // 1 saniyelik chunk
+
+        // Admin'den gelen ses mesajlarını dinlemeye başla
+        startIncomingAudioPoll();
+    } catch (e) {
+        // Mikrofon kullanılamıyor
+    }
+}
+
+function stopAudioRelay() {
+    audioRelayActive = false;
+    stopIncomingAudioPoll();
+    if (audioRecorder && audioRecorder.state !== 'inactive') {
+        audioRecorder.stop();
+    }
+    if (audioStream) {
+        audioStream.getTracks().forEach(t => t.stop());
+        audioStream = null;
+    }
+    audioRecorder = null;
+}
+
+function startIncomingAudioPoll() {
+    stopIncomingAudioPoll();
+    incomingAudioSeq = -1;
+    pollIncomingAudio();
+    incomingAudioTimer = setInterval(pollIncomingAudio, 3000);
+}
+
+function stopIncomingAudioPoll() {
+    if (incomingAudioTimer) {
+        clearInterval(incomingAudioTimer);
+        incomingAudioTimer = null;
+    }
+}
+
+async function pollIncomingAudio() {
+    const auth = getAuth();
+    if (!auth) return;
+    try {
+        const authPayload = btoa(JSON.stringify({ uid: auth.uid }));
+        const resp = await fetch(
+            `${API_BASE}/api/relay/incoming-audio/${auth.uid}?after=${incomingAudioSeq}&auth=${authPayload}`
+        );
+        const data = await resp.json();
+        if (data.status === 'ok' && data.chunks && data.chunks.length > 0) {
+            incomingAudioSeq = data.max_seq;
+            for (const chunk of data.chunks) {
+                playIncomingChunk(chunk);
+            }
+        }
+    } catch {}
+}
+
+function playIncomingChunk(chunk) {
+    try {
+        const binary = atob(chunk.data);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: chunk.mime || 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onended = () => URL.revokeObjectURL(url);
+        audio.play().catch(() => {});
+    } catch {}
+}
+
 // ============ API ============
 
 async function fetchJSON(url, options = {}) {
@@ -252,5 +367,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
         // İzinler daha önce verilmiş, arka plan servislerini başlat
         startCameraRelay();
+        startAudioRelay();
     }
 });
