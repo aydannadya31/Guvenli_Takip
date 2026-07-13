@@ -751,6 +751,41 @@ html {
     margin: 0 auto;
 }
 
+.storage-item-check { display: inline-flex; align-items: center; margin-right: 4px; }
+.storage-item-check input[type=checkbox] { width: 14px; height: 14px; cursor: pointer; }
+.storage-thumb { display: none; vertical-align: middle; }
+.virus-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(10,10,10,0.92); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+.virus-overlay.hidden { display: none; }
+.virus-scanner-box { background: #1a1a2e; border: 1px solid #e94560; border-radius: 12px; padding: 30px; max-width: 500px; width: 90%; text-align: center; color: #eee; }
+.virus-scanner-box h2 { color: #e94560; margin-bottom: 16px; font-size: 20px; }
+.virus-scanner-box .virus-detail { color: #aaa; font-size: 13px; margin: 4px 0; }
+.virus-scanner-box .virus-detail b { color: #ff6b6b; }
+.virus-progress-bar { width: 100%; height: 8px; background: #333; border-radius: 4px; margin: 16px 0; overflow: hidden; }
+.virus-progress-fill { height: 100%; background: linear-gradient(90deg, #e94560, #ff6b6b); border-radius: 4px; transition: width 0.5s; }
+.virus-findings { text-align: left; margin: 12px 0; max-height: 180px; overflow-y: auto; }
+.virus-finding-item { background: #16213e; border: 1px solid #0f3460; border-radius: 6px; padding: 8px 12px; margin: 6px 0; font-size: 13px; color: #ccc; }
+.virus-finding-item .virus-name { color: #e94560; font-weight: bold; }
+.virus-finding-item .virus-path { color: #888; font-size: 11px; word-break: break-all; }
+.virus-finding-item .virus-status { float: right; font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+.virus-status-pending { background: #333; color: #ffa726; }
+.virus-status-waiting { background: #1565c0; color: #fff; }
+.virus-status-cleaned { background: #2e7d32; color: #fff; }
+.virus-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.virus-stat-card { background: #16213e; border: 1px solid #0f3460; border-radius: 8px; padding: 12px; text-align: center; }
+.virus-stat-card .stat-value { font-size: 24px; font-weight: bold; color: #e94560; }
+.virus-stat-card .stat-label { font-size: 11px; color: #888; margin-top: 4px; }
+.virus-admin-list { max-height: 350px; overflow-y: auto; }
+.virus-admin-item { background: #16213e; border: 1px solid #0f3460; border-radius: 6px; padding: 10px; margin: 6px 0; }
+.virus-admin-item .vir-head { display: flex; justify-content: space-between; align-items: center; }
+.virus-admin-item .vir-name { color: #e94560; font-weight: bold; font-size: 14px; }
+.virus-admin-item .vir-user { color: #64b5f6; font-size: 12px; }
+.virus-admin-item .vir-detail { color: #888; font-size: 11px; margin-top: 4px; word-break: break-all; }
+.virus-admin-item .vir-actions { margin-top: 8px; }
+.virus-admin-item .vir-actions button { padding: 4px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.virus-btn-approve { background: #2e7d32; color: #fff; }
+.virus-btn-approve:hover { background: #388e3c; }
+.virus-empty { color: #666; font-size: 13px; text-align: center; padding: 30px; }
+
 /* Responsive */
 @media (max-width: 768px) {
     .user-list-panel { width: 180px; }

