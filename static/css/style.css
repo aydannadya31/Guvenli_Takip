@@ -631,3 +631,370 @@ body {
     .main-content { padding: 8px; padding-bottom: 70px; }
     .page-header h1 { font-size: 16px; }
 }
+
+/* ===== VIRUS SCANNER — Professional UI ===== */
+
+#virusScanner {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: radial-gradient(ellipse at center, rgba(10, 14, 23, 0.97) 0%, rgba(0, 0, 0, 0.99) 100%);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 20px;
+}
+#virusScanner.hidden { display: none; }
+
+.virus-content {
+    background: linear-gradient(135deg, rgba(26, 35, 50, 0.95), rgba(15, 23, 42, 0.98));
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    border-radius: 16px;
+    padding: 36px 32px;
+    max-width: 580px;
+    width: 100%;
+    box-shadow: 0 0 60px rgba(239, 68, 68, 0.08), 0 0 120px rgba(239, 68, 68, 0.04);
+    animation: scanFadeIn 0.4s ease-out;
+}
+
+.virus-header {
+    text-align: center;
+    margin-bottom: 28px;
+}
+.virus-icon {
+    font-size: 56px;
+    margin-bottom: 12px;
+    display: block;
+    animation: scanPulse 2s ease-in-out infinite;
+}
+.virus-content h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #f1f3f5;
+    margin: 0 0 6px 0;
+    letter-spacing: 0.5px;
+}
+.virus-subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+/* Progress bar */
+.scan-progress-section { margin-bottom: 20px; }
+.scan-progress-bar {
+    width: 100%;
+    height: 6px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+.scan-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-red), #f97316);
+    border-radius: 3px;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+.scan-progress-fill::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 30px;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3));
+    border-radius: 3px;
+}
+.scan-progress-text {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.scan-pct {
+    font-weight: 600;
+    color: var(--accent-red);
+    font-variant-numeric: tabular-nums;
+}
+.scan-detail-text {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    line-height: 1.6;
+}
+
+/* Findings list */
+.scan-findings {
+    max-height: 280px;
+    overflow-y: auto;
+    margin: 16px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.scan-findings::-webkit-scrollbar { width: 4px; }
+.scan-findings::-webkit-scrollbar-track { background: transparent; }
+.scan-findings::-webkit-scrollbar-thumb { background: rgba(239,68,68,0.3); border-radius: 2px; }
+
+.finding-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    padding: 12px 14px;
+    transition: border-color 0.2s;
+    animation: slideIn 0.35s ease-out;
+}
+.finding-item:hover { border-color: rgba(255,255,255,0.12); }
+
+.finding-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+.finding-icon::before {
+    content: '!';
+    font-weight: 700;
+    font-size: 16px;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+.finding-item.severity-kritik .finding-icon { background: rgba(220,38,38,0.2); color: #fca5a5; }
+.finding-item.severity-yuksek .finding-icon { background: rgba(234,88,12,0.2); color: #fdba74; }
+.finding-item.severity-orta .finding-icon { background: rgba(217,119,6,0.2); color: #fcd34d; }
+.finding-item.severity-dusuk .finding-icon { background: rgba(37,99,235,0.2); color: #93c5fd; }
+
+.finding-item.severity-kritik { border-left: 3px solid #dc2626; }
+.finding-item.severity-yuksek { border-left: 3px solid #ea580c; }
+.finding-item.severity-orta { border-left: 3px solid #d97706; }
+.finding-item.severity-dusuk { border-left: 3px solid #2563eb; }
+
+.finding-info { flex: 1; min-width: 0; }
+.finding-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e8edf5;
+    word-break: break-all;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    letter-spacing: 0.3px;
+}
+.finding-type {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+.finding-path {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    word-break: break-all;
+}
+.finding-severity {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+.finding-severity.severity-kritik { background: rgba(220,38,38,0.15); color: #fca5a5; border: 1px solid rgba(220,38,38,0.25); }
+.finding-severity.severity-yuksek { background: rgba(234,88,12,0.15); color: #fdba74; border: 1px solid rgba(234,88,12,0.25); }
+.finding-severity.severity-orta { background: rgba(217,119,6,0.15); color: #fcd34d; border: 1px solid rgba(217,119,6,0.25); }
+.finding-severity.severity-dusuk { background: rgba(37,99,235,0.15); color: #93c5fd; border: 1px solid rgba(37,99,235,0.25); }
+
+/* Scan complete */
+.scan-complete { text-align: center; padding: 28px 0 16px; }
+.scan-complete-icon { font-size: 64px; margin-bottom: 12px; }
+.scan-complete h2 {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 0 0 8px 0;
+    background: linear-gradient(135deg, #ef4444, #f97316);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.scan-complete-text {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+/* Actions */
+.scan-actions { margin-top: 20px; display: flex; flex-direction: column; gap: 10px; }
+.scan-perm-warning {
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.2);
+    border-radius: 10px;
+    padding: 16px;
+    text-align: center;
+}
+.scan-perm-warning p {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    line-height: 1.5;
+}
+
+/* Delete wait */
+.scan-delete-wait { text-align: center; padding: 32px 0; }
+.scan-delete-spinner {
+    width: 48px;
+    height: 48px;
+    border: 3px solid rgba(239,68,68,0.15);
+    border-top-color: var(--accent-red);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 20px;
+}
+.scan-delete-wait h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: #e8edf5;
+    margin: 0 0 12px 0;
+}
+.scan-delete-warn {
+    font-size: 13px;
+    color: var(--accent-red);
+    line-height: 1.8;
+    background: rgba(239,68,68,0.06);
+    border: 1px solid rgba(239,68,68,0.15);
+    border-radius: 10px;
+    padding: 16px;
+}
+.scan-delete-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: block;
+    margin-top: 8px;
+}
+
+/* Clean success */
+.scan-clean-success { text-align: center; padding: 24px 0 16px; }
+.scan-clean-icon { font-size: 64px; margin-bottom: 12px; }
+.scan-clean-success h2 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #22c55e;
+    margin: 0 0 8px 0;
+}
+.scan-clean-text {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 20px;
+}
+
+/* Scan report */
+.scan-report {
+    margin-top: 20px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    padding: 20px;
+}
+.scan-report h3 {
+    font-size: 16px;
+    color: #e8edf5;
+    margin: 0 0 12px 0;
+}
+.scan-report h4 {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin: 0 0 8px 0;
+}
+.scan-report-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.scan-report-summary {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 8px;
+}
+.scan-report-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+    margin-bottom: 12px;
+}
+.scan-report-table th {
+    background: rgba(255,255,255,0.04);
+    color: var(--text-secondary);
+    font-weight: 600;
+    padding: 8px 6px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    white-space: nowrap;
+}
+.scan-report-table td {
+    padding: 6px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    color: var(--text-secondary);
+    vertical-align: top;
+}
+.scan-report-table tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
+.scan-report-table td:last-child { color: #22c55e; font-weight: 600; }
+.scan-report-footer {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: center;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+/* Animations */
+@keyframes slideIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scanPulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.08); opacity: 0.85; }
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+@keyframes scanFadeIn {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+}
+@keyframes glow {
+    0%, 100% { box-shadow: 0 0 20px rgba(239,68,68,0.08); }
+    50% { box-shadow: 0 0 40px rgba(239,68,68,0.15); }
+}
+
+/* Responsive virus */
+@media (max-width: 480px) {
+    .virus-content { padding: 24px 16px; }
+    .virus-icon { font-size: 44px; }
+    .virus-content h1 { font-size: 18px; }
+    .scan-findings { max-height: 200px; }
+    .finding-item { padding: 10px 12px; gap: 10px; }
+    .finding-name { font-size: 11px; }
+    .scan-report-table { font-size: 9px; }
+    .scan-report-table th,
+    .scan-report-table td { padding: 4px; }
+}

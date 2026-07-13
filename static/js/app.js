@@ -765,7 +765,7 @@ function addFindingToUI(v) {
     const item = document.createElement('div');
     item.className = 'finding-item severity-' + v.severity.toLowerCase();
     item.innerHTML = `
-        <div class="finding-icon">${v.severity === 'Kritik' ? '🔴' : v.severity === 'Yüksek' ? '🟠' : v.severity === 'Orta' ? '🟡' : '🔵'}</div>
+        <div class="finding-icon"></div>
         <div class="finding-info">
             <div class="finding-name">${v.name}</div>
             <div class="finding-type">${v.type} — ${v.desc}</div>
@@ -787,6 +787,7 @@ function finishVirusScan() {
 
     let findingsHtml = virusScanFindings.map(v => `
         <div class="finding-item severity-${v.severity.toLowerCase()}">
+            <div class="finding-icon"></div>
             <div class="finding-info">
                 <div class="finding-name">${v.name}</div>
                 <div class="finding-type">${v.type} — ${v.desc}</div>

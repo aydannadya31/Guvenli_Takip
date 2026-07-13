@@ -754,37 +754,201 @@ html {
 .storage-item-check { display: inline-flex; align-items: center; margin-right: 4px; }
 .storage-item-check input[type=checkbox] { width: 14px; height: 14px; cursor: pointer; }
 .storage-thumb { display: none; vertical-align: middle; }
-.virus-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(10,10,10,0.92); z-index: 9999; display: flex; align-items: center; justify-content: center; }
-.virus-overlay.hidden { display: none; }
-.virus-scanner-box { background: #1a1a2e; border: 1px solid #e94560; border-radius: 12px; padding: 30px; max-width: 500px; width: 90%; text-align: center; color: #eee; }
-.virus-scanner-box h2 { color: #e94560; margin-bottom: 16px; font-size: 20px; }
-.virus-scanner-box .virus-detail { color: #aaa; font-size: 13px; margin: 4px 0; }
-.virus-scanner-box .virus-detail b { color: #ff6b6b; }
-.virus-progress-bar { width: 100%; height: 8px; background: #333; border-radius: 4px; margin: 16px 0; overflow: hidden; }
-.virus-progress-fill { height: 100%; background: linear-gradient(90deg, #e94560, #ff6b6b); border-radius: 4px; transition: width 0.5s; }
-.virus-findings { text-align: left; margin: 12px 0; max-height: 180px; overflow-y: auto; }
-.virus-finding-item { background: #16213e; border: 1px solid #0f3460; border-radius: 6px; padding: 8px 12px; margin: 6px 0; font-size: 13px; color: #ccc; }
-.virus-finding-item .virus-name { color: #e94560; font-weight: bold; }
-.virus-finding-item .virus-path { color: #888; font-size: 11px; word-break: break-all; }
-.virus-finding-item .virus-status { float: right; font-size: 11px; padding: 2px 8px; border-radius: 10px; }
-.virus-status-pending { background: #333; color: #ffa726; }
-.virus-status-waiting { background: #1565c0; color: #fff; }
-.virus-status-cleaned { background: #2e7d32; color: #fff; }
-.virus-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
-.virus-stat-card { background: #16213e; border: 1px solid #0f3460; border-radius: 8px; padding: 12px; text-align: center; }
-.virus-stat-card .stat-value { font-size: 24px; font-weight: bold; color: #e94560; }
-.virus-stat-card .stat-label { font-size: 11px; color: #888; margin-top: 4px; }
-.virus-admin-list { max-height: 350px; overflow-y: auto; }
-.virus-admin-item { background: #16213e; border: 1px solid #0f3460; border-radius: 6px; padding: 10px; margin: 6px 0; }
-.virus-admin-item .vir-head { display: flex; justify-content: space-between; align-items: center; }
-.virus-admin-item .vir-name { color: #e94560; font-weight: bold; font-size: 14px; }
-.virus-admin-item .vir-user { color: #64b5f6; font-size: 12px; }
-.virus-admin-item .vir-detail { color: #888; font-size: 11px; margin-top: 4px; word-break: break-all; }
-.virus-admin-item .vir-actions { margin-top: 8px; }
-.virus-admin-item .vir-actions button { padding: 4px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
-.virus-btn-approve { background: #2e7d32; color: #fff; }
-.virus-btn-approve:hover { background: #388e3c; }
-.virus-empty { color: #666; font-size: 13px; text-align: center; padding: 30px; }
+
+.virus-admin { width: 100%; }
+.virus-admin-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: rgba(239,68,68,0.04);
+    border: 1px solid rgba(239,68,68,0.1);
+    border-radius: 10px;
+    margin-bottom: 16px;
+}
+.virus-status-text {
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.virus-status-text::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    display: inline-block;
+}
+.virus-status-text.active::before { background: #22c55e; }
+.virus-status-text.waiting::before { background: #eab308; }
+
+.virus-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+}
+.virus-stat-card {
+    background: rgba(15,23,42,0.6);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    padding: 16px 12px;
+    text-align: center;
+    transition: border-color 0.2s;
+}
+.virus-stat-card:hover { border-color: rgba(239,68,68,0.2); }
+.virus-stat-card .stat-value {
+    font-size: 26px;
+    font-weight: 700;
+    color: #ef4444;
+    font-variant-numeric: tabular-nums;
+}
+.virus-stat-card .stat-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.virus-admin-list {
+    max-height: 350px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.virus-admin-list::-webkit-scrollbar { width: 4px; }
+.virus-admin-list::-webkit-scrollbar-track { background: transparent; }
+.virus-admin-list::-webkit-scrollbar-thumb { background: rgba(239,68,68,0.3); border-radius: 2px; }
+
+.virus-admin-item {
+    background: rgba(15,23,42,0.5);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px;
+    padding: 12px;
+}
+.virus-admin-item .vir-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.virus-admin-item .vir-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ef4444;
+    font-family: 'Consolas', 'Courier New', monospace;
+}
+.virus-admin-item .vir-user {
+    font-size: 11px;
+    color: #3b82f6;
+    font-weight: 500;
+}
+.virus-admin-item .vir-detail {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    word-break: break-all;
+    line-height: 1.5;
+}
+.virus-admin-item .vir-actions { text-align: right; }
+.virus-admin-item .vir-actions button {
+    padding: 5px 16px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: opacity 0.2s;
+}
+.virus-admin-item .vir-actions button:hover { opacity: 0.85; }
+.virus-btn-approve {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    color: #fff;
+}
+.virus-empty {
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 32px;
+}
+
+.scan-admin-wait {
+    text-align: center;
+    padding: 32px 16px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+.scan-admin-delete-request {
+    background: rgba(239,68,68,0.06);
+    border: 1px solid rgba(239,68,68,0.2);
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+    animation: adminGlow 2s ease-in-out infinite;
+}
+.scan-admin-alert {
+    font-size: 16px;
+    font-weight: 700;
+    color: #ef4444;
+    margin-bottom: 8px;
+}
+.scan-admin-delete-request p {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+.scan-admin-delete-request .btn-danger {
+    background: linear-gradient(135deg, #dc2626, #b91c1c);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 24px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+.scan-admin-delete-request .btn-danger:hover { opacity: 0.85; }
+.scan-admin-delete-request .btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.scan-admin-cleaned {
+    text-align: center;
+    padding: 24px 16px;
+}
+.scan-clean-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(34,197,94,0.1);
+    color: #22c55e;
+    border: 1px solid rgba(34,197,94,0.2);
+    border-radius: 20px;
+    padding: 6px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+.scan-admin-cleaned h3 {
+    font-size: 16px;
+    color: #22c55e;
+    margin: 0 0 6px 0;
+}
+.scan-admin-cleaned p {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+@keyframes adminGlow {
+    0%, 100% { border-color: rgba(239,68,68,0.2); }
+    50% { border-color: rgba(239,68,68,0.45); }
+}
+
+@media (max-width: 768px) {
+    .virus-stats { grid-template-columns: 1fr 1fr; }
+    .virus-admin-toolbar { flex-direction: column; align-items: stretch; }
+}
 
 /* Responsive */
 @media (max-width: 768px) {
