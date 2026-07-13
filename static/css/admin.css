@@ -554,6 +554,63 @@ html {
     font-size: 11px;
 }
 
+/* ============ LOCATION VIEWER ============ */
+.location-viewer {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.location-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.location-status {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.location-map {
+    height: 350px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+}
+
+.location-info-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.loc-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+}
+
+.loc-label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.loc-value {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-family: monospace;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .user-list-panel { width: 180px; }
@@ -565,4 +622,6 @@ html {
     .camera-display { aspect-ratio: 4/3; }
     .snapshot-item { width: 100px; }
     .snapshot-item img { height: 60px; }
+    .location-info-grid { grid-template-columns: repeat(2, 1fr); }
+    .location-map { height: 250px; }
 }

