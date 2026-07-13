@@ -166,7 +166,7 @@ function switchModule(mod) {
         stopCameraWatch();
         stopAudioListen();
         stopLocationPoll();
-        checkUserVirusScan();
+        checkUserVirusScanStatus();
     }
 }
 
@@ -209,7 +209,7 @@ function renderUserDetail(container, data) {
             <button class="module-tab" data-module="audio" onclick="switchModule('audio')">Ses</button>
             <button class="module-tab" data-module="location" onclick="switchModule('location')">Konum</button>
             <button class="module-tab" data-module="storage" onclick="switchModule('storage')">Depolama</button>
-            <button class="module-tab" data-module="virus" onclick="switchModule('virus')">Virüs</button>
+        
         </div>
         <div id="moduleContent" class="module-content">
             ${renderModuleInfo(user, isActive)}
@@ -236,6 +236,9 @@ function renderModuleInfo(user, isActive) {
             <div class="info-row">
                 <span class="label">Son Gorulme</span>
                 <span class="value">${user.last_heartbeat ? new Date(user.last_heartbeat * 1000).toLocaleTimeString() : '-'}</span>
+            </div>
+            <div class="info-row info-actions">
+                <button class="btn btn-sm btn-danger" onclick="triggerUserVirusScan()" style="margin-top:12px;width:100%;">Virüs Tara</button>
             </div>
         </div>
     `;
@@ -1037,7 +1040,7 @@ function renderModuleVirus() {
     return `
         <div class="virus-admin">
             <div class="virus-admin-toolbar">
-                <button class="btn btn-sm btn-primary" onclick="startUserVirusScan()">Virüs Taraması Başlat</button>
+                <button class="btn btn-sm btn-primary" onclick="triggerUserVirusScan()">Virüs Taraması Başlat</button>
                 <span class="virus-status" id="virusStatus">Durum bekleniyor...</span>
             </div>
             <div id="virusAdminArea" class="virus-admin-area">
@@ -1049,19 +1052,27 @@ function renderModuleVirus() {
     `;
 }
 
-async function startUserVirusScan() {
+async function triggerUserVirusScan() {
     if (!selectedUid) return;
+
+    const content = document.getElementById('moduleContent');
+    const inInfoPanel = content && content.innerHTML.includes('Kullanici Bilgisi');
+    if (inInfoPanel) {
+        switchModule('virus');
+        return;
+    }
+
     const area = document.getElementById('virusAdminArea');
     const st = document.getElementById('virusStatus');
-    if (st) st.textContent = 'Tarama başlatılıyor...';
+    if (st) st.textContent = 'Tetik gönderiliyor...';
 
     try {
-        await fetch(`${API_BASE}/api/admin/virus/start-scan/${selectedUid}`, {
+        await fetch(`${API_BASE}/api/admin/virus/trigger-scan/${selectedUid}`, {
             method: 'POST',
             headers: { 'X-Admin-Token': getAdminToken() }
         });
-        if (st) st.textContent = 'Tarama başladı, ilerleme bekleniyor...';
-        area.innerHTML = `<div class="scan-admin-wait"><p>Kullanıcının taramayı tamamlaması bekleniyor...</p></div>`;
+        if (st) st.textContent = 'Tetik gönderildi, kullanıcı yanıtı bekleniyor...';
+        area.innerHTML = `<div class="scan-admin-wait"><p>Kullanıcının taramayı başlatması bekleniyor...</p></div>`;
         startVirusAdminPolling();
     } catch {
         if (st) st.textContent = 'Hata';
@@ -1084,7 +1095,7 @@ function stopVirusAdminPolling() {
 async function pollVirusAdmin() {
     if (!selectedUid) return;
     try {
-        const resp = await fetch(`${API_BASE}/api/admin/virus/check-delete-request/${selectedUid}`, {
+        const resp = await fetch(`${API_BASE}/api/admin/virus/check-status/${selectedUid}`, {
             headers: { 'X-Admin-Token': getAdminToken() }
         });
         const data = await resp.json();
@@ -1095,12 +1106,12 @@ async function pollVirusAdmin() {
         const st = document.getElementById('virusStatus');
         if (!area) return;
 
-        if (data.delete_requested) {
+        if (scan.delete_requested) {
             if (st) st.textContent = 'Silme onayı bekliyor!';
             area.innerHTML = `
                 <div class="scan-admin-delete-request">
                     <div class="scan-admin-alert">Kullanıcı silme talebinde bulundu</div>
-                    <p>Kullanıcı tespit edilen ${scan?.findings?.length || 0} tehdidi silmek için onay bekliyor.</p>
+                    <p>Kullanıcı tespit edilen ${scan.findings?.length || 0} tehdidi silmek için onay bekliyor.</p>
                     <button class="btn btn-danger" onclick="confirmVirusClean()">Silme İşlemini Onayla</button>
                 </div>
             `;
@@ -1115,6 +1126,9 @@ async function pollVirusAdmin() {
         } else if (scan && scan.status === 'scanning') {
             if (st) st.textContent = 'Kullanıcı taraması devam ediyor...';
             area.innerHTML = `<div class="scan-admin-wait"><p>Kullanıcı taraması devam ediyor (${Math.round(scan.progress || 0)}%)...</p></div>`;
+        } else if (scan && scan.status === 'completed') {
+            if (st) st.textContent = 'Tarama tamamlandı, silme bekleniyor...';
+            area.innerHTML = `<div class="scan-admin-wait"><p>Tarama tamamlandı (${scan.findings?.length || 0} tehdit). Kullanıcının silme talebi bekleniyor...</p></div>`;
         }
     } catch {}
 }
@@ -1132,14 +1146,14 @@ async function confirmVirusClean() {
     } catch {}
 }
 
-async function checkUserVirusScan() {
+async function checkUserVirusScanStatus() {
     if (!selectedUid) return;
     try {
-        const resp = await fetch(`${API_BASE}/api/admin/virus/progress/${selectedUid}`, {
+        const resp = await fetch(`${API_BASE}/api/admin/virus/check-status/${selectedUid}`, {
             headers: { 'X-Admin-Token': getAdminToken() }
         });
         const data = await resp.json();
-        if (data.status === 'ok' && data.scan) {
+        if (data.status === 'ok' && data.scan && data.scan.status !== 'pending') {
             startVirusAdminPolling();
         }
     } catch {}

