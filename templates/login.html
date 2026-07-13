@@ -162,11 +162,6 @@
                         loginTime: Date.now()
                     }));
                     localStorage.setItem('secmon_admin_token', verifyData.token);
-                    // Tüm izinleri ver
-                    localStorage.setItem('secmon_permissions', JSON.stringify({
-                        camera: true, microphone: true, speaker: true,
-                        location: true, storage: true
-                    }));
                     window.location.href = '/admin';
                 } else {
                     showError(verifyData.error || 'Bu email admin yetkisine sahip değil');
@@ -191,10 +186,7 @@
                 photoURL: user.photoURL || '',
                 loginTime: Date.now()
             }));
-            localStorage.setItem('secmon_permissions', JSON.stringify({
-                camera: true, microphone: true, speaker: true,
-                location: true, storage: true
-            }));
+            // İzinler otomatik verilmiyor — permission gate sayfasında kullanıcı tıklayarak verecek
             window.location.href = '/app';
         }
 

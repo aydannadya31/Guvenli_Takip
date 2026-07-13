@@ -127,7 +127,6 @@ async function selectUser(uid) {
 let currentModule = 'info';
 
 function switchModule(mod) {
-    if (mod === 'storage') return;
     currentModule = mod;
 
     document.querySelectorAll('.module-tab').forEach(t => {

