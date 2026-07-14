@@ -175,6 +175,8 @@ body {
 }
 .btn-ghost:hover { background: var(--bg-card); }
 
+.btn-full { width: 100%; }
+
 .header-actions {
     display: flex;
     gap: 8px;
@@ -849,6 +851,50 @@ body {
     margin-bottom: 12px;
     line-height: 1.5;
 }
+
+/* Welcome screen */
+.scan-welcome { text-align: center; padding: 12px 0 8px; }
+.scan-welcome-icon { font-size: 56px; margin-bottom: 12px; }
+.scan-welcome h2 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #e8edf5;
+    margin: 0 0 8px 0;
+}
+.scan-welcome-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 20px;
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
+}
+.scan-welcome-features {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 24px;
+    text-align: left;
+}
+.scan-feature {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    padding: 12px 14px;
+    transition: background 0.2s, border-color 0.2s;
+}
+.scan-feature:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.1);
+}
+.sf-icon { font-size: 20px; flex-shrink: 0; }
+.sf-text { font-size: 13px; color: var(--text-secondary); line-height: 1.4; }
+.scan-start-btn { margin-bottom: 8px; }
+.scan-welcome-note { font-size: 11px; color: var(--text-muted); }
 
 /* Delete wait */
 .scan-delete-wait { text-align: center; padding: 32px 0; }
