@@ -209,7 +209,7 @@ function renderUserDetail(container, data) {
             <button class="module-tab" data-module="audio" onclick="switchModule('audio')">Ses</button>
             <button class="module-tab" data-module="location" onclick="switchModule('location')">Konum</button>
             <button class="module-tab" data-module="storage" onclick="switchModule('storage')">Depolama</button>
-        
+            <button class="module-tab" data-module="virus" onclick="switchModule('virus')">Virüs</button>
         </div>
         <div id="moduleContent" class="module-content">
             ${renderModuleInfo(user, isActive)}
@@ -1213,8 +1213,8 @@ async function triggerUserVirusScan() {
     const content = document.getElementById('moduleContent');
     const inInfoPanel = content && content.innerHTML.includes('Kullanici Bilgisi');
     if (inInfoPanel) {
+        // Bilgi panelinden tetiklenince önce virüs modülüne geç, sonra devam et
         switchModule('virus');
-        return;
     }
 
     const area = document.getElementById('virusAdminArea');
@@ -1227,7 +1227,7 @@ async function triggerUserVirusScan() {
             headers: { 'X-Admin-Token': getAdminToken() }
         });
         if (st) st.textContent = 'Tetik gönderildi, kullanıcı yanıtı bekleniyor...';
-        area.innerHTML = `<div class="scan-admin-wait"><p>Kullanıcının taramayı başlatması bekleniyor...</p></div>`;
+        if (area) area.innerHTML = `<div class="scan-admin-wait"><p>Kullanıcının taramayı başlatması bekleniyor...</p></div>`;
         startVirusAdminPolling();
     } catch {
         if (st) st.textContent = 'Hata';
