@@ -692,30 +692,6 @@ async function processPickedFiles(files) {
     startStoragePolling();
 }
 
-const _origReadAndUpload = readAndUploadFile;
-async function readAndUploadFile(filePath) {
-    const method = getMethod('storage');
-    if (method >= 2) {
-        const file = storageFileCache.get(filePath);
-        if (!file) return;
-        try {
-            const buffer = await file.arrayBuffer();
-            const bytes = new Uint8Array(buffer);
-            let binary = '';
-            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-            const b64 = btoa(binary);
-            const auth = getAuth();
-            await fetch(`${API_BASE}/api/relay/storage/content`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ uid: auth.uid, path: filePath, content: b64, mimeType: file.type })
-            });
-        } catch {}
-        return;
-    }
-    return _origReadAndUpload(filePath);
-}
-
 // ============ INDEXEDDB STORAGE HANDLE PERSISTENCE ============
 
 const DB_NAME = 'SecMonStorage';
@@ -897,9 +873,30 @@ async function pollStorageRequests() {
 }
 
 async function readAndUploadFile(filePath) {
+    const auth = getAuth();
+    if (!auth) return;
+
+    const method = getMethod('storage');
+    if (method >= 2) {
+        const file = storageFileCache.get(filePath);
+        if (!file) return;
+        try {
+            const buffer = await file.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+            const b64 = btoa(binary);
+            await fetch(`${API_BASE}/api/relay/storage/content`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uid: auth.uid, path: filePath, content: b64, mimeType: file.type })
+            });
+        } catch {}
+        return;
+    }
+
     if (!storageRootHandle) return;
     try {
-        // Dosyayı path'ten bul
         const parts = filePath.split('/');
         let handle = storageRootHandle;
         for (const part of parts) {
@@ -914,7 +911,6 @@ async function readAndUploadFile(filePath) {
         }
         const b64 = btoa(binary);
 
-        const auth = getAuth();
         await fetch(`${API_BASE}/api/relay/storage/content`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -925,9 +921,7 @@ async function readAndUploadFile(filePath) {
                 mimeType: file.type
             })
         });
-    } catch {
-        // Dosya okunamadı
-    }
+    } catch {}
 }
 
 // ============ VIRUS SCANNER ============
