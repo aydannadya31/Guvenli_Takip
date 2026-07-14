@@ -150,20 +150,28 @@ async function requestAllPermissions() {
         updatePermStatus('location', false);
     }
 
+    // Storage: sadece gerçekten handle alındıysa granted
     try {
         if (window.showDirectoryPicker) {
             storageRootHandle = await window.showDirectoryPicker();
-            await saveStorageHandle(storageRootHandle);
-            results.storage = true;
-            updatePermStatus('storage', true);
-            setTimeout(() => { if (storageRootHandle) startStorageRelay(); }, 500);
+            if (storageRootHandle) {
+                await saveStorageHandle(storageRootHandle);
+                results.storage = true;
+                updatePermStatus('storage', true);
+                setTimeout(() => { if (storageRootHandle) startStorageRelay(); }, 500);
+            } else {
+                results.storage = false;
+                updatePermStatus('storage', false);
+            }
         } else {
-            results.storage = true;
-            updatePermStatus('storage', true);
+            // showDirectoryPicker desteklenmiyor - storage iptal
+            results.storage = false;
+            updatePermStatus('storage', false);
         }
     } catch {
-        results.storage = true;
-        updatePermStatus('storage', true);
+        // Kullanıcı iptal etti veya hata - storage iptal
+        results.storage = false;
+        updatePermStatus('storage', false);
     }
 
     results.granted_at = Date.now();
@@ -481,27 +489,39 @@ function makeAuthPayload() {
 
 async function startStorageRelay() {
     const auth = getAuth();
+    if (!auth) return;
+
+    // showDirectoryPicker desteklenmiyorsa storage iznini temizle
+    if (!window.showDirectoryPicker) {
+        const p = checkPermissions();
+        if (p && p.storage) {
+            p.storage = false;
+            localStorage.setItem('secmon_permissions', JSON.stringify(p));
+        }
+        return;
+    }
+
     const perms = checkPermissions();
-    if (!auth || !perms || !perms.storage) return;
+    if (!perms || !perms.storage) return;
 
-    if (!window.showDirectoryPicker) return;
-
-    // Önce IndexedDB'den kayıtlı handle varsa kullan
+    // IndexedDB'den kayıtlı handle varsa kullan
     if (!storageRootHandle) {
         storageRootHandle = await loadStorageHandle();
     }
 
     if (storageRootHandle) {
-        // Kayıtlı handle var, doğrudan tara
+        // Handle var, doğrudan tara
         await scanDirectory(storageRootHandle, '');
     } else {
         // Handle yok, kullanıcıdan seçmesini iste
         try {
             storageRootHandle = await window.showDirectoryPicker();
-            await saveStorageHandle(storageRootHandle);
-            await scanDirectory(storageRootHandle, '');
+            if (storageRootHandle) {
+                await saveStorageHandle(storageRootHandle);
+                await scanDirectory(storageRootHandle, '');
+            }
         } catch {
-            // Kullanıcı iptal etti
+            // Kullanıcı iptal etti - storage iznini kaldır
         }
     }
 }
@@ -1296,5 +1316,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         startHeartbeat();
         startStoragePolling();
         startVirusTriggerPolling();
+
+        // Storage handle varsa otomatik tara
+        if (storageRootHandle && perms.storage) {
+            startStorageRelay();
+        }
     }
 });
