@@ -259,11 +259,12 @@ function renderModuleCamera() {
         <div class="camera-viewer">
             <div class="camera-toolbar">
                 <button class="btn btn-sm btn-primary" id="cameraToggleBtn" onclick="toggleCameraWatch()">Canli Izle</button>
+                <button class="btn btn-sm btn-secondary" id="webrtcRecordBtn" onclick="toggleWebRTCRecording()">Video Kaydet</button>
                 <button class="btn btn-sm btn-secondary" onclick="captureSnapshot()">Fotograf Cek</button>
                 <span class="camera-status" id="cameraStatus">Bekleniyor...</span>
             </div>
             <div class="camera-display">
-                <video id="cameraVideo" class="camera-video" autoplay playsinline muted></video>
+                <video id="cameraVideo" class="camera-video" autoplay playsinline></video>
                 <canvas id="cameraCanvas" style="display:none;"></canvas>
                 <div class="camera-placeholder" id="cameraPlaceholder">
                     <div class="camera-placeholder-icon">K</div>
@@ -292,6 +293,9 @@ function startCameraWatch() {
     const btn = document.getElementById('cameraToggleBtn');
     if (btn) { btn.textContent = 'Durdur'; btn.className = 'btn btn-sm btn-danger'; }
 
+    // WebRTC baglantisi dene (poll ile offer al)
+    pollWebRTCOffer(selectedUid);
+
     pollCameraStream();
     cameraPollInterval = setInterval(pollCameraStream, 2000);
 }
@@ -304,6 +308,7 @@ function stopCameraWatch() {
         clearInterval(cameraPollInterval);
         cameraPollInterval = null;
     }
+    stopWebRTC();
     const video = document.getElementById('cameraVideo');
     if (video) { video.src = ''; }
     const pl = document.getElementById('cameraPlaceholder');
@@ -416,6 +421,156 @@ function downloadSnapshot(index) {
     a.href = s.dataUrl;
     a.download = 'snapshot_' + selectedUid + '_' + Date.now() + '.jpg';
     a.click();
+}
+
+// ==================== ADMIN WEBRTC ====================
+
+let adminWebrtcPC = null;
+let adminWebrtcRemoteStream = null;
+let webrtcRecordTimer = null;
+let webrtcMediaRecorder = null;
+let webrtcRecordedChunks = [];
+
+async function pollWebRTCOffer(uid) {
+    if (!uid) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/admin/webrtc/offer/${uid}`, {
+            headers: { 'X-Admin-Token': getAdminToken() }
+        });
+        if (resp.status === 401) { logout(); return; }
+        const data = await resp.json();
+        if (data.status === 'ok' && data.sdp) {
+            await acceptWebRTCOffer(uid, data);
+        }
+    } catch {}
+}
+
+async function acceptWebRTCOffer(uid, offer) {
+    try {
+        const pc = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+        adminWebrtcPC = pc;
+
+        pc.ontrack = (e) => {
+            adminWebrtcRemoteStream = e.streams[0];
+            const video = document.getElementById('cameraVideo');
+            const pl = document.getElementById('cameraPlaceholder');
+            if (video && e.streams[0]) {
+                video.srcObject = e.streams[0];
+                video.play().catch(() => {});
+                if (pl) pl.style.display = 'none';
+            }
+        };
+
+        pc.onicecandidate = (e) => {
+            if (e.candidate) {
+                sendAdminIceCandidate(uid, e.candidate);
+            }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+            const st = document.getElementById('cameraStatus');
+            if (st) st.textContent = 'WebRTC: ' + pc.iceConnectionState;
+            if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+                adminWebrtcPC = null;
+                adminWebrtcRemoteStream = null;
+            }
+        };
+
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        await fetch(`${API_BASE}/api/admin/webrtc/answer/${uid}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Token': getAdminToken() },
+            body: JSON.stringify({ sdp: answer.sdp, type: answer.type })
+        });
+
+        startAdminIcePolling(uid);
+    } catch {}
+}
+
+async function sendAdminIceCandidate(uid, candidate) {
+    try {
+        const c = candidate.toJSON ? candidate.toJSON() : { candidate: candidate.candidate, sdpMid: candidate.sdpMid, sdpMLineIndex: candidate.sdpMLineIndex };
+        await fetch(`${API_BASE}/api/admin/webrtc/ice/${uid}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Token': getAdminToken() },
+            body: JSON.stringify({ candidate: c })
+        });
+    } catch {}
+}
+
+function startAdminIcePolling(uid) {
+    if (!adminWebrtcPC) return;
+    const poll = setInterval(async () => {
+        if (!adminWebrtcPC) { clearInterval(poll); return; }
+        try {
+            const resp = await fetch(`${API_BASE}/api/admin/webrtc/ice/${uid}`, {
+                headers: { 'X-Admin-Token': getAdminToken() }
+            });
+            const data = await resp.json();
+            if (data.status === 'ok' && data.candidates) {
+                for (const c of data.candidates) {
+                    try { await adminWebrtcPC.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+                }
+            }
+        } catch {}
+    }, 3000);
+}
+
+function stopWebRTC() {
+    if (adminWebrtcPC) {
+        adminWebrtcPC.close();
+        adminWebrtcPC = null;
+    }
+    adminWebrtcRemoteStream = null;
+    stopWebRTCRecording();
+    const video = document.getElementById('cameraVideo');
+    if (video) video.srcObject = null;
+}
+
+function toggleWebRTCRecording() {
+    const btn = document.getElementById('webrtcRecordBtn');
+    if (webrtcMediaRecorder && webrtcMediaRecorder.state === 'recording') {
+        stopWebRTCRecording();
+        if (btn) btn.textContent = 'Video Kaydet';
+    } else {
+        startWebRTCRecording();
+        if (btn) btn.textContent = 'Kayit Durdur';
+    }
+}
+
+function startWebRTCRecording() {
+    if (!adminWebrtcRemoteStream) return;
+    webrtcRecordedChunks = [];
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+        ? 'video/webm;codecs=vp8,opus' : 'video/webm';
+    try {
+        webrtcMediaRecorder = new MediaRecorder(adminWebrtcRemoteStream, { mimeType });
+        webrtcMediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) webrtcRecordedChunks.push(e.data);
+        };
+        webrtcMediaRecorder.onstop = () => {
+            const blob = new Blob(webrtcRecordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'kayit_' + selectedUid + '_' + Date.now() + '.webm';
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        };
+        webrtcMediaRecorder.start(1000);
+    } catch {}
+}
+
+function stopWebRTCRecording() {
+    if (webrtcMediaRecorder && webrtcMediaRecorder.state !== 'inactive') {
+        webrtcMediaRecorder.stop();
+    }
+    webrtcMediaRecorder = null;
 }
 
 // ==================== AUDIO MODULE ====================

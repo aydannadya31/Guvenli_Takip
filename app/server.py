@@ -807,6 +807,147 @@ def api_admin_location(uid):
     })
 
 
+# ==================== WEBRTC SIGNALING ====================
+
+webrtc_offers = {}  # uid -> {"sdp": ..., "type": "offer"}
+webrtc_answers = {}  # uid -> {"sdp": ..., "type": "answer"}
+webrtc_ice_candidates = {}  # uid -> {"admin": [...], "user": [...]}
+
+
+@app.route("/api/relay/webrtc/offer", methods=["POST"])
+def api_relay_webrtc_offer():
+    """Kullanıcı SDP offer gönderir."""
+    data = request.get_json() or {}
+    uid = data.get("uid", "")
+    auth_arg = data.get("auth", "")
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        if auth_data.get("uid") != uid:
+            return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        webrtc_offers[uid] = {"sdp": data.get("sdp"), "type": data.get("type", "offer"), "ts": time.time()}
+
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/admin/webrtc/offer/<uid>")
+def api_admin_webrtc_offer(uid):
+    """Admin kullanıcının SDP offer'ını alır."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        offer = webrtc_offers.get(uid)
+
+    if not offer:
+        return jsonify({"status": "pending"})
+
+    return jsonify({"status": "ok", "sdp": offer["sdp"], "type": offer["type"]})
+
+
+@app.route("/api/admin/webrtc/answer/<uid>", methods=["POST"])
+def api_admin_webrtc_answer(uid):
+    """Admin SDP answer gönderir."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    data = request.get_json() or {}
+    with relay_lock:
+        webrtc_answers[uid] = {"sdp": data.get("sdp"), "type": "answer", "ts": time.time()}
+
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/relay/webrtc/answer")
+def api_relay_webrtc_answer():
+    """Kullanıcı admin'in answer'ını alır."""
+    uid = request.args.get("uid", "")
+    auth_arg = request.args.get("auth", "")
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        if auth_data.get("uid") != uid:
+            return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        answer = webrtc_answers.get(uid)
+
+    if not answer:
+        return jsonify({"status": "pending"})
+
+    return jsonify({"status": "ok", "sdp": answer["sdp"], "type": answer["type"]})
+
+
+@app.route("/api/relay/webrtc/ice", methods=["POST"])
+def api_relay_webrtc_ice():
+    """Kullanıcı ICE candidate gönderir."""
+    data = request.get_json() or {}
+    uid = data.get("uid", "")
+    auth_arg = data.get("auth", "")
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        if auth_data.get("uid") != uid:
+            return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        if uid not in webrtc_ice_candidates:
+            webrtc_ice_candidates[uid] = {"admin": [], "user": []}
+        webrtc_ice_candidates[uid]["user"].append(data.get("candidate"))
+
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/admin/webrtc/ice/<uid>", methods=["GET", "POST"])
+def api_admin_webrtc_ice(uid):
+    """Admin ICE candidate alır/gönderir."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    if request.method == "POST":
+        data = request.get_json() or {}
+        with relay_lock:
+            if uid not in webrtc_ice_candidates:
+                webrtc_ice_candidates[uid] = {"admin": [], "user": []}
+            webrtc_ice_candidates[uid]["admin"].append(data.get("candidate"))
+        return jsonify({"status": "ok"})
+
+    # GET: admin kullanıcının ICE candidate'larını alır
+    with relay_lock:
+        candidates = webrtc_ice_candidates.get(uid, {}).get("user", [])
+        webrtc_ice_candidates[uid] = {"admin": webrtc_ice_candidates.get(uid, {}).get("admin", []), "user": []}
+
+    return jsonify({"status": "ok", "candidates": candidates})
+
+
+@app.route("/api/relay/webrtc/ice")
+def api_relay_webrtc_ice_get():
+    """Kullanıcı admin'in ICE candidate'larını alır."""
+    uid = request.args.get("uid", "")
+    auth_arg = request.args.get("auth", "")
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        if auth_data.get("uid") != uid:
+            return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        candidates = webrtc_ice_candidates.get(uid, {}).get("admin", [])
+        if uid in webrtc_ice_candidates:
+            webrtc_ice_candidates[uid]["admin"] = []
+
+    return jsonify({"status": "ok", "candidates": candidates})
+
+
 # ==================== IP KONUM API ====================
 
 @app.route("/api/ip-location")
