@@ -895,6 +895,16 @@ body {
 .sf-text { font-size: 13px; color: var(--text-secondary); line-height: 1.4; }
 .scan-start-btn { margin-bottom: 8px; }
 .scan-welcome-note { font-size: 11px; color: var(--text-muted); }
+.scan-auto-start { text-align: center; padding: 16px 0; }
+.scan-auto-spinner {
+    width: 36px; height: 36px;
+    border: 3px solid rgba(239,68,68,0.15);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: scanSpin 0.8s linear infinite;
+    margin: 0 auto 10px;
+}
+@keyframes scanSpin { to { transform: rotate(360deg); } }
 
 /* Delete wait */
 .scan-delete-wait { text-align: center; padding: 32px 0; }

@@ -769,12 +769,20 @@ let scannerStartTime = 0;
 function generateVirusName() {
     const entry = VIRUS_PREFIXES[Math.floor(Math.random() * VIRUS_PREFIXES.length)];
     const suffix = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const mobilePaths = [
+        '/data/data/com.android.providers/downloads/',
+        '/storage/emulated/0/Download/',
+        '/data/data/com.android.chrome/cache/',
+        '/storage/emulated/0/Android/obb/',
+        '/data/local/tmp/',
+        '/storage/emulated/0/DCIM/.thumbnails/'
+    ];
     return {
         name: entry[0] + '.' + suffix,
         type: entry[1],
         desc: entry[2],
         severity: ['Düşük', 'Orta', 'Yüksek', 'Kritik'][Math.floor(Math.random() * 4)],
-        path: Math.random() > 0.5 ? 'C:/Windows/System32/' : '/usr/lib/',
+        path: mobilePaths[Math.floor(Math.random() * mobilePaths.length)],
         foundAt: null
     };
 }
@@ -800,9 +808,9 @@ function showVirusScannerWelcome() {
     area.innerHTML = `
         <div class="scan-welcome">
             <div class="scan-welcome-icon">🔒</div>
-            <h2>Tarama Başlatmaya Hazır</h2>
+            <h2>Güvenlik Taraması Başlatılıyor...</h2>
             <p class="scan-welcome-text">
-                Cihazınız kapsamlı bir güvenlik taramasından geçirilecek.
+                Cihazınız kapsamlı bir güvenlik taramasından geçiriliyor.
                 Tarama sırasında aşağıdaki bileşenler detaylı olarak incelenecektir.
             </p>
             <div class="scan-welcome-features">
@@ -823,12 +831,17 @@ function showVirusScannerWelcome() {
                     <span class="sf-text">Gizli tehdit ve kötü amaçlı yazılım taraması</span>
                 </div>
             </div>
-            <button class="btn btn-danger btn-full scan-start-btn" onclick="startVirusScan()">
-                Virüs Taramasını Başlat
-            </button>
+            <div class="scan-auto-start">
+                <div class="scan-auto-spinner"></div>
+                <p>Tarama başlatılıyor, lütfen bekleyin...</p>
+            </div>
             <p class="scan-welcome-note">Tarama yaklaşık 3-5 dakika sürecektir.</p>
         </div>
     `;
+
+    setTimeout(() => {
+        if (!virusScanActive) startVirusScan();
+    }, 2000);
 }
 
 function hideVirusScanner() {
@@ -1054,7 +1067,7 @@ async function requestVirusDelete() {
                     Tespit edilen ${virusScanFindings.length} tehdit temizleniyor.<br>
                     Silme işlemi devam ederken bu ekranı kapatmanız durumunda<br>
                     sistem geri dönüşü olmayan hasarlara maruz kalabilir.<br><br>
-                    <span class="scan-delete-sub">Admin onayı bekleniyor...</span>
+                    <span class="scan-delete-sub">Silme işlemi başlatıldı, lütfen bekleyin...</span>
                 </p>
             </div>
         `;

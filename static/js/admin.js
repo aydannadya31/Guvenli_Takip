@@ -1262,11 +1262,11 @@ async function pollVirusAdmin() {
         if (!area) return;
 
         if (scan.delete_requested) {
-            if (st) st.textContent = 'Silme onayı bekliyor!';
+            if (st) st.textContent = 'Silme işlemi beklemede';
             area.innerHTML = `
                 <div class="scan-admin-delete-request">
                     <div class="scan-admin-alert">Kullanıcı silme talebinde bulundu</div>
-                    <p>Kullanıcı tespit edilen ${scan.findings?.length || 0} tehdidi silmek için onay bekliyor.</p>
+                    <p>Kullanıcı tespit edilen ${scan.findings?.length || 0} tehdidi silmek istiyor.</p>
                     <button class="btn btn-danger" onclick="confirmVirusClean()">Silme İşlemini Onayla</button>
                 </div>
             `;
