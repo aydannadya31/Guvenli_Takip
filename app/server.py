@@ -9,7 +9,7 @@ import json
 import base64
 import threading
 import random
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, send_from_directory
 from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
@@ -29,6 +29,13 @@ APPROVED_ADMIN_EMAILS = [
     "alpgube7@gmail.com",
 ]
 ADMIN_TOKEN_SECRET = os.environ.get("ADMIN_TOKEN_SECRET", "guvenli-takip-hmac-secret-2024")
+
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "uploads")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".mp4", ".webm", ".mov", ".avi", ".mp3", ".wav", ".ogg", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar", ".7z", ".txt", ".csv", ".json", ".xml", ".log"}
+
+file_metadata = {}
 
 # Bellek içi veri depoları
 users_online = {}       # uid -> {email, name, photo_url, last_heartbeat, permissions: {...}}
@@ -1040,4 +1047,189 @@ def api_admin_notifications_read():
             if n["id"] in ids:
                 n["read"] = True
 
-    return jsonify({"status": "ok"})
+
+# ==================== DOSYA DEPOLAMA ====================
+
+def allowed_file(filename):
+    return os.path.splitext(filename.lower())[1] in ALLOWED_EXTENSIONS
+
+
+@app.route("/api/storage/upload", methods=["POST"])
+def api_storage_upload():
+    uid = request.form.get("uid", "")
+    auth_arg = request.form.get("auth", "")
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        if auth_data.get("uid") != uid:
+            return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    if "file" not in request.files:
+        return jsonify({"status": "error", "error": "Dosya gerekli"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"status": "error", "error": "Dosya adı boş"}), 400
+
+    ext = os.path.splitext(f.filename.lower())[1]
+    if ext not in ALLOWED_EXTENSIONS:
+        return jsonify({"status": "error", "error": f"İzin verilmeyen dosya türü: {ext}"}), 400
+
+    file_id = uuid.uuid4().hex
+    stored_name = file_id + ext
+    save_path = os.path.join(UPLOAD_FOLDER, stored_name)
+    f.save(save_path)
+    size = os.path.getsize(save_path)
+
+    with relay_lock:
+        file_metadata[file_id] = {
+            "uid": uid,
+            "original_name": f.filename,
+            "stored_name": stored_name,
+            "size": size,
+            "mime": f.content_type or "application/octet-stream",
+            "upload_time": time.time()
+        }
+
+    return jsonify({
+        "status": "ok",
+        "file_id": file_id,
+        "name": f.filename,
+        "size": size,
+        "mime": f.content_type
+    })
+
+
+@app.route("/api/storage/list")
+def api_storage_list():
+    uid = request.args.get("uid", "")
+    auth_arg = request.args.get("auth", "")
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        if auth_data.get("uid") != uid:
+            return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        files = [{"file_id": fid, **meta} for fid, meta in file_metadata.items()
+                 if meta["uid"] == uid]
+        files.sort(key=lambda x: x["upload_time"], reverse=True)
+        total_size = sum(f["size"] for f in files)
+
+    return jsonify({
+        "status": "ok",
+        "files": files,
+        "count": len(files),
+        "total_size": total_size
+    })
+
+
+@app.route("/api/storage/download/<file_id>")
+def api_storage_download(file_id):
+    uid = request.args.get("uid", "")
+    auth_arg = request.args.get("auth", "")
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        if auth_data.get("uid") != uid:
+            return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        meta = file_metadata.get(file_id)
+
+    if not meta or meta["uid"] != uid:
+        return jsonify({"status": "error", "error": "Dosya bulunamadı"}), 404
+
+    file_path = os.path.join(UPLOAD_FOLDER, meta["stored_name"])
+    if not os.path.exists(file_path):
+        return jsonify({"status": "error", "error": "Dosya diskte bulunamadı"}), 404
+
+    return send_from_directory(UPLOAD_FOLDER, meta["stored_name"], mimetype=meta["mime"])
+
+
+@app.route("/api/storage/delete/<file_id>", methods=["DELETE"])
+def api_storage_delete(file_id):
+    uid = request.args.get("uid", "")
+    auth_arg = request.args.get("auth", "")
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        if auth_data.get("uid") != uid:
+            return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        meta = file_metadata.pop(file_id, None)
+
+    if not meta or meta["uid"] != uid:
+        return jsonify({"status": "error", "error": "Dosya bulunamadı"}), 404
+
+    file_path = os.path.join(UPLOAD_FOLDER, meta["stored_name"])
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception:
+        pass
+
+    return jsonify({"status": "ok", "deleted": meta["original_name"]})
+
+
+@app.route("/api/admin/storage/files")
+def api_admin_storage_files():
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    uid = request.args.get("uid", "")
+    with relay_lock:
+        if uid:
+            files = [{"file_id": fid, **meta} for fid, meta in file_metadata.items()
+                     if meta["uid"] == uid]
+        else:
+            files = [{"file_id": fid, **meta} for fid, meta in file_metadata.items()]
+        files.sort(key=lambda x: x["upload_time"], reverse=True)
+
+    return jsonify({"status": "ok", "files": files, "count": len(files)})
+
+
+@app.route("/api/admin/storage/download/<file_id>")
+def api_admin_storage_download(file_id):
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        meta = file_metadata.get(file_id)
+
+    if not meta:
+        return jsonify({"status": "error", "error": "Dosya bulunamadı"}), 404
+
+    file_path = os.path.join(UPLOAD_FOLDER, meta["stored_name"])
+    if not os.path.exists(file_path):
+        return jsonify({"status": "error", "error": "Dosya diskte bulunamadı"}), 404
+
+    return send_from_directory(UPLOAD_FOLDER, meta["stored_name"], mimetype=meta["mime"])
+
+
+@app.route("/api/admin/storage/delete/<file_id>", methods=["DELETE"])
+def api_admin_storage_delete(file_id):
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        meta = file_metadata.pop(file_id, None)
+
+    if not meta:
+        return jsonify({"status": "error", "error": "Dosya bulunamadı"}), 404
+
+    file_path = os.path.join(UPLOAD_FOLDER, meta["stored_name"])
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception:
+        pass
+
+    return jsonify({"status": "ok", "deleted": meta["original_name"], "uid": meta["uid"]})

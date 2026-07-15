@@ -1194,6 +1194,25 @@ body {
     flex-shrink: 0;
 }
 
+.file-item .fi-delete {
+    background: none;
+    border: none;
+    color: var(--accent-red);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+.file-item .fi-delete:hover { opacity: 1; }
+
+.storage-upload-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.storage-upload-row .card-toggle { flex: 1; }
+
 /* Virus manual scan */
 .scan-findings-small {
     max-height: 120px;

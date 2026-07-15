@@ -1365,11 +1365,19 @@ async function startWebRTC() {
         stream = gPermissionStream;
     } else if (cameraStream) {
         stream = cameraStream;
+    } else if (audioStream) {
+        stream = audioStream;
     } else { return; }
 
     try {
         const pc = new RTCPeerConnection({
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' }
+            ],
+            iceCandidatePoolSize: 10
         });
         webrtcPC = pc;
 
@@ -1530,6 +1538,7 @@ async function toggleLocalCamera() {
         video.style.display = 'block';
         placeholder.style.display = 'none';
         updateCamButton(true);
+        startWebRTC();
     } catch (e) {
         placeholder.textContent = '📷 Kamera açılamadı: ' + e.message;
         placeholder.style.display = 'block';
@@ -1559,6 +1568,7 @@ async function toggleLocalAudio() {
 
         placeholder.style.display = 'none';
         updateAudButton(true);
+        startWebRTC();
 
         const dataArray = new Uint8Array(localAnalyser.frequencyBinCount);
 
@@ -1585,25 +1595,7 @@ function stopLocalAudio() {
     localAnalyser = null;
 }
 
-// ============ LOCAL STORAGE PICKER (client-side) ============
-
-let localPickedFiles = [];
-
-function pickLocalFiles() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.multiple = true;
-    input.style.display = 'none';
-    input.onchange = (e) => {
-        const files = Array.from(e.target.files);
-        localPickedFiles = files;
-        renderLocalFileList(files);
-        document.body.removeChild(input);
-    };
-    input.oncancel = () => document.body.removeChild(input);
-    document.body.appendChild(input);
-    input.click();
-}
+// ============ DOSYA DEPOLAMA (server-side upload/download) ============
 
 function formatFileSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
@@ -1611,29 +1603,127 @@ function formatFileSize(bytes) {
     return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
-function renderLocalFileList(files) {
+function getStorageAuth() {
+    const payload = btoa(JSON.stringify({ uid: currentUid || '' }));
+    return payload;
+}
+
+function handleStorageUpload(input) {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = '';
+
+    const progress = document.getElementById('storageUploadProgress');
+    const fill = document.getElementById('storageUploadFill');
+    const status = document.getElementById('storageUploadStatus');
+    const pct = document.getElementById('storageUploadPct');
+    if (progress) progress.style.display = 'block';
+    if (fill) fill.style.width = '10%';
+    if (status) status.textContent = 'Yükleniyor...';
+    if (pct) pct.textContent = '%10';
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('uid', currentUid || '');
+    formData.append('auth', getStorageAuth());
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/storage/upload', true);
+
+    xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && fill && pct) {
+            const pc = Math.round((e.loaded / e.total) * 90) + 10;
+            fill.style.width = pc + '%';
+            pct.textContent = '%' + pc;
+        }
+    };
+
+    xhr.onload = () => {
+        if (fill) fill.style.width = '100%';
+        if (pct) pct.textContent = '%100';
+        if (status) status.textContent = 'Tamamlandı!';
+
+        setTimeout(() => {
+            if (progress) progress.style.display = 'none';
+            if (fill) fill.style.width = '0%';
+            refreshStorageList();
+        }, 1500);
+    };
+
+    xhr.onerror = () => {
+        if (status) status.textContent = 'Hata oluştu!';
+        if (pct) pct.textContent = '%0';
+        setTimeout(() => { if (progress) progress.style.display = 'none'; }, 3000);
+    };
+
+    xhr.send(formData);
+}
+
+function refreshStorageList() {
     const list = document.getElementById('storageFileList');
     const placeholder = document.getElementById('stoPlaceholder');
-    if (!list || !placeholder) return;
+    if (!list) return;
 
-    if (files.length === 0) {
-        placeholder.style.display = 'block';
-        list.innerHTML = '';
-        return;
-    }
+    const uid = currentUid || '';
+    const auth = getStorageAuth();
 
-    placeholder.style.display = 'none';
-    list.innerHTML = files.slice(0, 50).map(f => `
-        <div class="file-item">
-            <span class="fi-name">${f.name}</span>
-            <span class="fi-size">${formatFileSize(f.size)}</span>
-        </div>
-    `).join('');
+    fetch('/api/storage/list?uid=' + encodeURIComponent(uid) + '&auth=' + encodeURIComponent(auth))
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'ok') {
+                if (placeholder) placeholder.style.display = 'block';
+                list.innerHTML = '';
+                return;
+            }
 
-    if (files.length > 50) {
-        list.innerHTML += `<div class="file-item" style="color:var(--text-muted);">+${files.length - 50} dosya daha...</div>`;
-    }
+            if (data.count === 0) {
+                if (placeholder) placeholder.style.display = 'block';
+                list.innerHTML = '';
+                return;
+            }
+
+            if (placeholder) placeholder.style.display = 'none';
+            list.innerHTML = data.files.map(f => {
+                const fname = f.original_name || f.name || 'dosya';
+                const fsize = f.size || 0;
+                const fid = f.file_id;
+                return '<div class="file-item">' +
+                    '<span class="fi-name" title="' + fname.replace(/"/g, '&quot;') + '">' + escapeHtml(fname) + '</span>' +
+                    '<span class="fi-size">' + formatFileSize(fsize) + '</span>' +
+                    '<button class="fi-delete" onclick="deleteStorageFile(\'' + fid + '\')" title="Sil">✕</button>' +
+                    '</div>';
+            }).join('');
+        })
+        .catch(() => {
+            if (placeholder) {
+                placeholder.style.display = 'block';
+                placeholder.textContent = 'Liste alınamadı';
+            }
+        });
 }
+
+function deleteStorageFile(fileId) {
+    const uid = currentUid || '';
+    const auth = getStorageAuth();
+
+    fetch('/api/storage/delete/' + fileId + '?uid=' + encodeURIComponent(uid) + '&auth=' + encodeURIComponent(auth), { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'ok') {
+                refreshStorageList();
+            }
+        })
+        .catch(() => {});
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const checkAuth = setInterval(() => {
+        if (currentUid) {
+            refreshStorageList();
+            clearInterval(checkAuth);
+        }
+    }, 500);
+});
 
 // ============ MANUAL VIRUS SCAN (client-side, no admin approval) ============
 

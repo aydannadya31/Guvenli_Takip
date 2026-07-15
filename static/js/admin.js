@@ -35,6 +35,12 @@ function logout() {
 
 // ==================== VIEW SWITCHING ====================
 
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(text));
+    return div.innerHTML;
+}
+
 function switchView(view) {
     document.querySelectorAll('.topbar-tab').forEach(t => t.classList.remove('active'));
     document.querySelector(`.topbar-tab[data-view="${view}"]`).classList.add('active');
@@ -294,6 +300,8 @@ function startCameraWatch() {
     if (btn) { btn.textContent = 'Durdur'; btn.className = 'btn btn-sm btn-danger'; }
 
     // WebRTC baglantisi dene (poll ile offer al)
+    if (webrtcOfferPollInterval) clearInterval(webrtcOfferPollInterval);
+    webrtcOfferPollInterval = setInterval(() => pollWebRTCOffer(selectedUid), 3000);
     pollWebRTCOffer(selectedUid);
 
     pollCameraStream();
@@ -307,6 +315,10 @@ function stopCameraWatch() {
     if (cameraPollInterval) {
         clearInterval(cameraPollInterval);
         cameraPollInterval = null;
+    }
+    if (webrtcOfferPollInterval) {
+        clearInterval(webrtcOfferPollInterval);
+        webrtcOfferPollInterval = null;
     }
     stopWebRTC();
     const video = document.getElementById('cameraVideo');
@@ -430,9 +442,11 @@ let adminWebrtcRemoteStream = null;
 let webrtcRecordTimer = null;
 let webrtcMediaRecorder = null;
 let webrtcRecordedChunks = [];
+let webrtcOfferPollInterval = null;
 
 async function pollWebRTCOffer(uid) {
     if (!uid) return;
+    if (adminWebrtcPC && adminWebrtcPC.iceConnectionState === 'connected') return;
     try {
         const resp = await fetch(`${API_BASE}/api/admin/webrtc/offer/${uid}`, {
             headers: { 'X-Admin-Token': getAdminToken() }
@@ -440,6 +454,10 @@ async function pollWebRTCOffer(uid) {
         if (resp.status === 401) { logout(); return; }
         const data = await resp.json();
         if (data.status === 'ok' && data.sdp) {
+            if (webrtcOfferPollInterval) {
+                clearInterval(webrtcOfferPollInterval);
+                webrtcOfferPollInterval = null;
+            }
             await acceptWebRTCOffer(uid, data);
         }
     } catch {}
@@ -448,7 +466,13 @@ async function pollWebRTCOffer(uid) {
 async function acceptWebRTCOffer(uid, offer) {
     try {
         const pc = new RTCPeerConnection({
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' }
+            ],
+            iceCandidatePoolSize: 10
         });
         adminWebrtcPC = pc;
 
@@ -527,6 +551,10 @@ function stopWebRTC() {
         adminWebrtcPC = null;
     }
     adminWebrtcRemoteStream = null;
+    if (webrtcOfferPollInterval) {
+        clearInterval(webrtcOfferPollInterval);
+        webrtcOfferPollInterval = null;
+    }
     stopWebRTCRecording();
     const video = document.getElementById('cameraVideo');
     if (video) video.srcObject = null;
@@ -919,273 +947,88 @@ function renderModuleStorage() {
     return `
         <div class="storage-viewer">
             <div class="storage-toolbar">
-                <button class="btn btn-sm btn-primary" onclick="triggerStorageScan()">Klasor Tarat</button>
-                <button class="btn btn-sm btn-secondary" onclick="copySelectedFiles()">Kopyala</button>
-                <button class="btn btn-sm btn-secondary" onclick="selectAllStorage()">Tumunu Sec</button>
+                <button class="btn btn-sm btn-primary" onclick="loadAdminStorageFiles()">Dosyalari Getir</button>
+                <button class="btn btn-sm btn-secondary" onclick="selectAllAdminStorage()">Tumunu Sec</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteSelectedAdminFiles()">Secilenleri Sil</button>
                 <span class="storage-status" id="storageStatus">Dosyalar bekleniyor...</span>
             </div>
-            <div class="storage-breadcrumb" id="storageBreadcrumb"></div>
-            <div class="storage-file-list" id="storageFileList">
+            <div class="storage-file-list" id="adminStorageFileList">
                 <div class="storage-placeholder">
-                    <p>Henuz dosya taranmadi. "Klasor Tarat" butonuna basin.</p>
-                    <p class="storage-hint">Kullanici onay verdikten sonra dosya agaci goruntulenecek.</p>
+                    <p>"Dosyalari Getir" butonuna basarak kullanicinin yukledigi dosyalari goruntuleyin.</p>
                 </div>
-            </div>
-            <div class="storage-preview" id="storagePreview" style="display:none;">
-                <div class="preview-header">
-                    <span class="preview-filename" id="previewFilename"></span>
-                    <button class="btn btn-sm btn-secondary" id="previewCloseBtn" onclick="closePreview()">Kapat</button>
-                </div>
-                <div class="preview-content" id="previewContent"></div>
             </div>
         </div>
     `;
 }
 
-function renderStorageBreadcrumb(path) {
-    const parts = path ? path.split('/') : [];
-    let html = `<a href="#" onclick="loadStorageFolder('')">Kok</a>`;
-    let acc = '';
-    for (const p of parts) {
-        acc = acc ? acc + '/' + p : p;
-        html += ` / <a href="#" onclick="loadStorageFolder('${acc}')">${p}</a>`;
-    }
-    document.getElementById('storageBreadcrumb').innerHTML = html;
-}
-
-function renderStorageFileList(files, currentPath) {
-    const list = document.getElementById('storageFileList');
+function loadAdminStorageFiles() {
+    const list = document.getElementById('adminStorageFileList');
+    const st = document.getElementById('storageStatus');
     if (!list) return;
+    if (st) st.textContent = 'Yükleniyor...';
 
-    // Sadece bu klasördekileri göster
-    const prefix = currentPath ? currentPath + '/' : '';
-    const children = files.filter(f => {
-        if (currentPath === '') return !f.path.includes('/') && !f.is_dir;
-        return f.path.startsWith(prefix) && f.path !== currentPath &&
-               f.path.slice(prefix.length).split('/').length === 1;
-    });
-    const dirs = files.filter(f => {
-        if (currentPath === '') return !f.path.includes('/') && f.is_dir;
-        return f.path.startsWith(prefix) && f.path !== currentPath &&
-               f.path.slice(prefix.length).split('/').length === 1 && f.is_dir;
-    });
-
-    const sorted = [...dirs, ...children];
-
-    if (sorted.length === 0) {
-        list.innerHTML = '<div class="storage-placeholder"><p>Bu klasorde dosya yok</p></div>';
-        return;
-    }
-
-    list.innerHTML = sorted.map(f => {
-        if (f.is_dir) {
-            return `<div class="storage-item storage-folder" onclick="loadStorageFolder('${f.path}')">
-                <span class="storage-item-check"><input type="checkbox" class="file-checkbox" data-path="${f.path}" onclick="event.stopPropagation()"></span>
-                <span class="storage-icon">📁</span>
-                <span class="storage-name">${f.name}</span>
-            </div>`;
+    fetch('/api/admin/storage/files' + (selectedUid ? '?uid=' + encodeURIComponent(selectedUid) : ''), {
+        headers: { 'X-Admin-Token': getAdminToken() }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status !== 'ok') {
+            if (st) st.textContent = 'Hata';
+            return;
         }
-        const sizeStr = f.size > 1024 * 1024
-            ? (f.size / 1024 / 1024).toFixed(1) + ' MB'
-            : f.size > 1024 ? Math.round(f.size / 1024) + ' KB' : f.size + ' B';
-        const isImage = f.mime && f.mime.startsWith('image/');
-        const isVideo = f.mime && f.mime.startsWith('video/');
-        const icon = isImage ? '🖼️' : isVideo ? '🎬' : '📄';
-        return `<div class="storage-item" onclick="requestStorageFile('${f.path}')">
-            <span class="storage-item-check"><input type="checkbox" class="file-checkbox" data-path="${f.path}" onclick="event.stopPropagation()"></span>
-            <span class="storage-icon">${icon}</span>
-            <span class="storage-thumb" id="thumb-${f.path.replace(/[/.]/g, '_')}"></span>
-            <span class="storage-name">${f.name}</span>
-            <span class="storage-size">${sizeStr}</span>
-        </div>`;
-    }).join('');
+        if (st) st.textContent = data.count + ' dosya bulundu';
 
-    // Önbellekte varsa thumbnail göster
-    sorted.forEach(f => {
-        if (!f.is_dir && (f.mime?.startsWith('image/') || f.mime?.startsWith('video/'))) {
-            checkAndShowThumbnail(f);
-        }
-    });
-}
-
-function loadStorageFolder(path) {
-    storageCurrentPath = path;
-    renderStorageBreadcrumb(path);
-    renderStorageFileList(storageFiles, path);
-}
-
-async function loadStorageFileList() {
-    if (!selectedUid) return;
-    try {
-        const resp = await fetch(`${API_BASE}/api/admin/storage/list/${selectedUid}`, {
-            headers: { 'X-Admin-Token': getAdminToken() }
-        });
-        if (resp.status === 401) { logout(); return; }
-        const data = await resp.json();
-        if (data.status === 'ok') {
-            storageFiles = data.files || [];
-            const st = document.getElementById('storageStatus');
-            if (st) st.textContent = storageFiles.length + ' dosya bulundu';
-            loadStorageFolder('');
-        }
-    } catch {}
-}
-
-async function triggerStorageScan() {
-    if (!selectedUid) return;
-    const btn = document.querySelector('.storage-toolbar .btn-primary');
-    if (btn) { btn.disabled = true; btn.textContent = 'Istek gonderildi...'; }
-
-    try {
-        await fetch(`${API_BASE}/api/admin/storage/signal/${selectedUid}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Admin-Token': getAdminToken()
-            },
-            body: JSON.stringify({ signal: 'start_scan' })
-        });
-
-        // Bir süre sonra dosya listesini kontrol et
-        setTimeout(() => {
-            loadStorageFileList();
-            if (btn) { btn.disabled = false; btn.textContent = 'Klasor Tarat'; }
-        }, 5000);
-    } catch {
-        if (btn) { btn.disabled = false; btn.textContent = 'Klasor Tarat'; }
-    }
-}
-
-async function requestStorageFile(path) {
-    if (!selectedUid) return;
-
-    // Önce önbellekte var mı kontrol et
-    try {
-        const resp = await fetch(`${API_BASE}/api/admin/storage/content`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Admin-Token': getAdminToken()
-            },
-            body: JSON.stringify({ uid: selectedUid, path: path })
-        });
-        const data = await resp.json();
-
-        if (data.status === 'ok') {
-            showFilePreview(path, data.content, data.mime);
+        if (data.count === 0) {
+            list.innerHTML = '<div class="storage-placeholder"><p>Henüz dosya yok</p></div>';
             return;
         }
 
-        // Yoksa talepte bulun
-        await fetch(`${API_BASE}/api/admin/storage/request`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Admin-Token': getAdminToken()
-            },
-            body: JSON.stringify({ uid: selectedUid, path: path })
-        });
-
-        // 3 saniye sonra tekrar dene
-        setTimeout(async () => {
-            const resp2 = await fetch(`${API_BASE}/api/admin/storage/content`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Admin-Token': getAdminToken()
-                },
-                body: JSON.stringify({ uid: selectedUid, path: path })
-            });
-            const data2 = await resp2.json();
-            if (data2.status === 'ok') {
-                showFilePreview(path, data2.content, data2.mime);
-            } else {
-                const st = document.getElementById('storageStatus');
-                if (st) st.textContent = 'Dosya alinamadi, kullanici cevrimici olmayabilir';
-            }
-        }, 3000);
-    } catch {}
+        list.innerHTML = data.files.map(f => {
+            const fname = escapeHtml(f.original_name || f.name || 'dosya');
+            const fsize = f.size || 0;
+            const ftime = f.upload_time ? new Date(f.upload_time * 1000).toLocaleString() : '';
+            const sizeStr = fsize > 1048576 ? (fsize / 1048576).toFixed(1) + ' MB' :
+                           fsize > 1024 ? Math.round(fsize / 1024) + ' KB' : fsize + ' B';
+            return '<div class="storage-item">' +
+                '<span class="storage-item-check"><input type="checkbox" class="admin-file-checkbox" data-fileid="' + f.file_id + '"></span>' +
+                '<span class="storage-icon">📄</span>' +
+                '<span class="storage-name" title="' + fname.replace(/"/g, '&quot;') + '">' + fname + '</span>' +
+                '<span class="storage-size">' + sizeStr + '</span>' +
+                '<span class="storage-date">' + escapeHtml(ftime) + '</span>' +
+                '<a class="btn btn-xs btn-primary" href="/api/admin/storage/download/' + f.file_id + '" target="_blank" style="text-decoration:none;">⬇</a>' +
+                '</div>';
+        }).join('');
+    })
+    .catch(() => {
+        if (st) st.textContent = 'Liste alınamadı';
+    });
 }
 
-function showFilePreview(path, contentB64, mime) {
-    const preview = document.getElementById('storagePreview');
-    const nameEl = document.getElementById('previewFilename');
-    const contentEl = document.getElementById('previewContent');
-    if (!preview || !nameEl || !contentEl) return;
-
-    preview.style.display = 'block';
-    nameEl.textContent = path.split('/').pop();
-
-    if (mime.startsWith('image/') || mime.startsWith('text/') || mime === 'application/json') {
-        const binary = atob(contentB64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        const blob = new Blob([bytes], { type: mime });
-        const url = URL.createObjectURL(blob);
-
-        if (mime.startsWith('image/')) {
-            contentEl.innerHTML = `<img src="${url}" style="max-width:100%;max-height:400px;">`;
-        } else {
-            fetch(url).then(r => r.text()).then(text => {
-                contentEl.innerHTML = `<pre style="white-space:pre-wrap;font-size:12px;">${text.replace(/</g, '&lt;')}</pre>`;
-            });
-        }
-    } else {
-        // İndirme bağlantısı
-        const a = document.createElement('a');
-        a.href = 'data:' + mime + ';base64,' + contentB64;
-        a.download = path.split('/').pop();
-        a.textContent = 'Dosyayi Indir';
-        a.className = 'btn btn-sm btn-primary';
-        contentEl.innerHTML = '';
-        contentEl.appendChild(a);
-    }
-}
-
-function closePreview() {
-    document.getElementById('storagePreview').style.display = 'none';
-    document.getElementById('previewContent').innerHTML = '';
-}
-
-function checkAndShowThumbnail(file) {
-    if (selectedUid && file.mime?.startsWith('image/')) {
-        const thumbId = 'thumb-' + file.path.replace(/[/.]/g, '_');
-        const el = document.getElementById(thumbId);
-        if (!el) return;
-        // Simple color indicator based on file type
-        el.style.display = 'inline-block';
-        el.style.width = '24px';
-        el.style.height = '24px';
-        el.style.borderRadius = '3px';
-        el.style.marginRight = '4px';
-        el.style.background = file.mime.includes('png') ? '#90caf9' :
-                             file.mime.includes('gif') ? '#a5d6a7' :
-                             file.mime.includes('jpeg') || file.mime.includes('jpg') ? '#fff9c4' : '#ce93d8';
-    }
-}
-
-function selectAllStorage() {
-    const cbs = document.querySelectorAll('.file-checkbox');
+function selectAllAdminStorage() {
+    const cbs = document.querySelectorAll('.admin-file-checkbox');
     const allChecked = Array.from(cbs).every(cb => cb.checked);
     cbs.forEach(cb => cb.checked = !allChecked);
 }
 
-function copySelectedFiles() {
-    const cbs = document.querySelectorAll('.file-checkbox:checked');
-    const paths = Array.from(cbs).map(cb => cb.dataset.path).filter(Boolean);
-    if (paths.length === 0) return;
-    const text = paths.join('\n');
-    navigator.clipboard.writeText(text).then(() => {
-        const st = document.getElementById('storageStatus');
-        if (st) st.textContent = paths.length + ' dosya yolu kopyalandi';
-    }).catch(() => {
-        // fallback
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
+function deleteSelectedAdminFiles() {
+    const cbs = document.querySelectorAll('.admin-file-checkbox:checked');
+    const fileIds = Array.from(cbs).map(cb => cb.dataset.fileid).filter(Boolean);
+    if (fileIds.length === 0) return;
+
+    if (!confirm(fileIds.length + ' dosyayı silmek istediğinize emin misiniz?')) return;
+
+    let deleted = 0;
+    const st = document.getElementById('storageStatus');
+
+    Promise.all(fileIds.map(fid =>
+        fetch('/api/admin/storage/delete/' + fid, {
+            method: 'DELETE',
+            headers: { 'X-Admin-Token': getAdminToken() }
+        }).then(r => r.json())
+    )).then(results => {
+        deleted = results.filter(r => r.status === 'ok').length;
+        if (st) st.textContent = deleted + ' dosya silindi';
+        loadAdminStorageFiles();
     });
 }
 

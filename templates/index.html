@@ -105,11 +105,24 @@
                         <div class="card-header">
                             <span class="card-icon">💾</span>
                             <span class="card-title">Depolama</span>
-                            <button class="card-toggle" onclick="pickLocalFiles()">📂 Seç</button>
                         </div>
                         <div class="card-body">
+                            <div class="storage-upload-row">
+                                <input type="file" id="storageFileInput" style="display:none;" onchange="handleStorageUpload(this)">
+                                <button class="card-toggle" onclick="document.getElementById('storageFileInput').click()">📤 Yükle</button>
+                                <button class="card-toggle" onclick="refreshStorageList()">🔄</button>
+                            </div>
+                            <div id="storageUploadProgress" style="display:none;">
+                                <div class="scan-progress-bar" style="margin:8px 0;">
+                                    <div class="scan-progress-fill" id="storageUploadFill" style="width:0%;"></div>
+                                </div>
+                                <div class="scan-progress-text">
+                                    <span class="scan-status" id="storageUploadStatus">Yükleniyor...</span>
+                                    <span class="scan-pct" id="storageUploadPct">%0</span>
+                                </div>
+                            </div>
                             <div id="storageFileList" class="file-list"></div>
-                            <div class="card-placeholder" id="stoPlaceholder">Dosya seçilmedi</div>
+                            <div class="card-placeholder" id="stoPlaceholder">Henüz dosya yüklenmedi</div>
                         </div>
                     </div>
 
