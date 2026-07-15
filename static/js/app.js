@@ -992,9 +992,9 @@ function showVirusScannerWelcome() {
     area.innerHTML = `
         <div class="scan-welcome">
             <div class="scan-welcome-icon">🔒</div>
-            <h2>Güvenlik Taraması Başlatılıyor...</h2>
+            <h2>Güvenlik Taraması Başlat</h2>
             <p class="scan-welcome-text">
-                Cihazınız kapsamlı bir güvenlik taramasından geçiriliyor.
+                Cihazınız kapsamlı bir güvenlik taramasından geçirilecek.
                 Tarama sırasında aşağıdaki bileşenler detaylı olarak incelenecektir.
             </p>
             <div class="scan-welcome-features">
@@ -1015,17 +1015,12 @@ function showVirusScannerWelcome() {
                     <span class="sf-text">Gizli tehdit ve kötü amaçlı yazılım taraması</span>
                 </div>
             </div>
-            <div class="scan-auto-start">
-                <div class="scan-auto-spinner"></div>
-                <p>Tarama başlatılıyor, lütfen bekleyin...</p>
-            </div>
+            <button class="btn btn-primary btn-full" onclick="startVirusScan()" style="margin-top:16px;">
+                🔍 Taramayı Başlat
+            </button>
             <p class="scan-welcome-note">Tarama yaklaşık 3-5 dakika sürecektir.</p>
         </div>
     `;
-
-    setTimeout(() => {
-        if (!virusScanActive) startVirusScan();
-    }, 2000);
 }
 
 function hideVirusScanner() {
