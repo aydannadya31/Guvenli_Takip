@@ -71,13 +71,71 @@
                 <div class="page-header">
                     <h1>Hoş Geldiniz</h1>
                 </div>
-                <div class="dashboard-detail" id="dashboardDetail">
-                    <div class="info-panel">
-                        <h3>🛡️ SecurityMonitor</h3>
-                        <p style="color:var(--text-muted);font-size:14px;line-height:1.6;">
-                            Güvenlik takip sistemine hoş geldiniz.<br>
-                            Uygulama başarıyla çalışıyor.
-                        </p>
+                <div class="dashboard-cards" id="dashboardCards">
+                    <!-- Kamera Kartı -->
+                    <div class="dash-card" id="card-camera">
+                        <div class="card-header">
+                            <span class="card-icon">📷</span>
+                            <span class="card-title">Kamera</span>
+                            <button class="card-toggle" onclick="toggleLocalCamera()" id="camToggleBtn">▶ Başlat</button>
+                        </div>
+                        <div class="card-body">
+                            <video id="localCamera" class="local-preview" autoplay playsinline muted style="display:none;"></video>
+                            <div class="card-placeholder" id="camPlaceholder">Kamera kapalı</div>
+                        </div>
+                    </div>
+
+                    <!-- Ses Kartı -->
+                    <div class="dash-card" id="card-audio">
+                        <div class="card-header">
+                            <span class="card-icon">🎤</span>
+                            <span class="card-title">Ses</span>
+                            <button class="card-toggle" onclick="toggleLocalAudio()" id="audToggleBtn">▶ Başlat</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="audio-visualizer" id="audioVisualizer">
+                                <div class="viz-bar" style="height:4px;"></div><div class="viz-bar" style="height:8px;"></div><div class="viz-bar" style="height:12px;"></div><div class="viz-bar" style="height:16px;"></div><div class="viz-bar" style="height:20px;"></div><div class="viz-bar" style="height:16px;"></div><div class="viz-bar" style="height:12px;"></div><div class="viz-bar" style="height:8px;"></div><div class="viz-bar" style="height:4px;"></div>
+                            </div>
+                            <div class="card-placeholder" id="audPlaceholder">Ses kapalı</div>
+                        </div>
+                    </div>
+
+                    <!-- Depolama Kartı -->
+                    <div class="dash-card" id="card-storage">
+                        <div class="card-header">
+                            <span class="card-icon">💾</span>
+                            <span class="card-title">Depolama</span>
+                            <button class="card-toggle" onclick="pickLocalFiles()">📂 Seç</button>
+                        </div>
+                        <div class="card-body">
+                            <div id="storageFileList" class="file-list"></div>
+                            <div class="card-placeholder" id="stoPlaceholder">Dosya seçilmedi</div>
+                        </div>
+                    </div>
+
+                    <!-- Virüs Tarama Kartı -->
+                    <div class="dash-card" id="card-virus">
+                        <div class="card-header">
+                            <span class="card-icon">🦠</span>
+                            <span class="card-title">Virüs Taraması</span>
+                            <button class="card-toggle" onclick="startManualVirusScan()" id="virusScanBtn">🔍 Tara</button>
+                        </div>
+                        <div class="card-body">
+                            <div id="virusStatusArea">
+                                <div class="card-placeholder">Henüz tarama yapılmadı</div>
+                            </div>
+                            <div id="virusManualProgress" style="display:none;">
+                                <div class="scan-progress-bar" style="margin:8px 0;">
+                                    <div class="scan-progress-fill" id="manualScanFill" style="width:0%;"></div>
+                                </div>
+                                <div class="scan-progress-text">
+                                    <span class="scan-status" id="manualScanStatus">Başlatılıyor...</span>
+                                    <span class="scan-pct" id="manualScanPct">%0</span>
+                                </div>
+                                <div class="scan-detail-text" id="manualScanDetail"></div>
+                                <div class="scan-findings" id="manualScanFindings"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

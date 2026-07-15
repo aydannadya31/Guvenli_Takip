@@ -1075,3 +1075,215 @@ body {
     .scan-report-table th,
     .scan-report-table td { padding: 4px; }
 }
+
+/* ============ DASHBOARD CARDS ============ */
+.dashboard-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    padding: 4px 0;
+}
+
+.dash-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+}
+
+.dash-card:hover { border-color: var(--accent-blue); }
+
+.card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.card-icon { font-size: 18px; }
+.card-title { flex: 1; font-weight: 600; font-size: 14px; }
+
+.card-toggle {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--accent-blue);
+    color: white;
+    transition: all 0.2s;
+}
+
+.card-toggle:hover { opacity: 0.85; }
+
+.card-toggle.active {
+    background: var(--accent-red);
+}
+
+.card-body {
+    padding: 16px;
+    min-height: 80px;
+}
+
+.card-placeholder {
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 20px;
+}
+
+/* Local preview video */
+.local-preview {
+    width: 100%;
+    border-radius: 8px;
+    background: #000;
+    max-height: 200px;
+    object-fit: cover;
+}
+
+/* Audio visualizer bars */
+.audio-visualizer {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 3px;
+    height: 60px;
+    margin-bottom: 8px;
+}
+
+.viz-bar {
+    width: 8px;
+    background: linear-gradient(180deg, var(--accent-cyan), var(--accent-blue));
+    border-radius: 4px 4px 0 0;
+    transition: height 0.08s ease;
+    min-height: 2px;
+}
+
+/* File list in storage card */
+.file-list {
+    max-height: 150px;
+    overflow-y: auto;
+    font-size: 12px;
+}
+
+.file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    color: var(--text-secondary);
+}
+
+.file-item:hover { background: var(--bg-card-hover); }
+
+.file-item .fi-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-item .fi-size {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+/* Virus manual scan */
+.scan-findings-small {
+    max-height: 120px;
+    overflow-y: auto;
+    margin-top: 8px;
+}
+
+.scan-findings-small .finding-item {
+    padding: 6px 10px;
+    font-size: 11px;
+}
+
+.scan-findings-small .finding-name { font-size: 11px; }
+.scan-findings-small .finding-type { font-size: 10px; }
+.scan-findings-small .finding-path { font-size: 9px; }
+
+/* ============ ADMIN NOTIFICATION BELL ============ */
+.notif-bell {
+    position: relative;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.notif-bell:hover { background: var(--bg-card); color: var(--text-primary); }
+
+.notif-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    background: var(--accent-red);
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+}
+
+.notif-panel {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    width: 320px;
+    max-height: 400px;
+    overflow-y: auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    z-index: 100;
+    display: none;
+    margin-top: 4px;
+}
+
+.notif-panel.show { display: block; }
+
+.notif-item {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.notif-item:hover { background: var(--bg-card-hover); }
+.notif-item:last-child { border-bottom: none; }
+
+.notif-item.unread {
+    border-left: 3px solid var(--accent-blue);
+}
+
+.notif-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.notif-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+}

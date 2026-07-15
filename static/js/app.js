@@ -1488,6 +1488,300 @@ async function pollVirusTrigger() {
     } catch {}
 }
 
+// ============ LOCAL CAMERA PREVIEW (client-side) ============
+
+let localCamStream = null;
+let localAudioStream = null;
+let localAudioCtx = null;
+let localAnalyser = null;
+let localAnimFrame = null;
+
+function updateCamButton(starting) {
+    const btn = document.getElementById('camToggleBtn');
+    if (!btn) return;
+    btn.textContent = starting ? '⏹ Durdur' : '▶ Başlat';
+    btn.className = 'card-toggle' + (starting ? ' active' : '');
+}
+
+function updateAudButton(starting) {
+    const btn = document.getElementById('audToggleBtn');
+    if (!btn) return;
+    btn.textContent = starting ? '⏹ Durdur' : '▶ Başlat';
+    btn.className = 'card-toggle' + (starting ? ' active' : '');
+}
+
+async function toggleLocalCamera() {
+    const video = document.getElementById('localCamera');
+    const placeholder = document.getElementById('camPlaceholder');
+    if (!video || !placeholder) return;
+
+    if (localCamStream) {
+        localCamStream.getTracks().forEach(t => t.stop());
+        localCamStream = null;
+        video.style.display = 'none';
+        placeholder.style.display = 'block';
+        updateCamButton(false);
+        return;
+    }
+
+    try {
+        localCamStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+        video.srcObject = localCamStream;
+        video.style.display = 'block';
+        placeholder.style.display = 'none';
+        updateCamButton(true);
+    } catch (e) {
+        placeholder.textContent = '📷 Kamera açılamadı: ' + e.message;
+        placeholder.style.display = 'block';
+    }
+}
+
+async function toggleLocalAudio() {
+    const placeholder = document.getElementById('audPlaceholder');
+    const bars = document.querySelectorAll('.viz-bar');
+    if (!placeholder) return;
+
+    if (localAudioStream) {
+        stopLocalAudio();
+        updateAudButton(false);
+        bars.forEach(b => b.style.height = '4px');
+        placeholder.style.display = 'block';
+        return;
+    }
+
+    try {
+        localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        localAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        localAnalyser = localAudioCtx.createAnalyser();
+        localAnalyser.fftSize = 32;
+        const source = localAudioCtx.createMediaStreamSource(localAudioStream);
+        source.connect(localAnalyser);
+
+        placeholder.style.display = 'none';
+        updateAudButton(true);
+
+        const dataArray = new Uint8Array(localAnalyser.frequencyBinCount);
+
+        function draw() {
+            if (!localAnalyser) return;
+            localAnalyser.getByteFrequencyData(dataArray);
+            bars.forEach((bar, i) => {
+                const val = i < dataArray.length ? dataArray[i] / 2 : 2;
+                bar.style.height = Math.max(2, val) + 'px';
+            });
+            localAnimFrame = requestAnimationFrame(draw);
+        }
+        draw();
+    } catch (e) {
+        placeholder.textContent = '🎤 Ses açılamadı: ' + e.message;
+        placeholder.style.display = 'block';
+    }
+}
+
+function stopLocalAudio() {
+    if (localAnimFrame) { cancelAnimationFrame(localAnimFrame); localAnimFrame = null; }
+    if (localAudioCtx) { localAudioCtx.close().catch(()=>{}); localAudioCtx = null; }
+    if (localAudioStream) { localAudioStream.getTracks().forEach(t => t.stop()); localAudioStream = null; }
+    localAnalyser = null;
+}
+
+// ============ LOCAL STORAGE PICKER (client-side) ============
+
+let localPickedFiles = [];
+
+function pickLocalFiles() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.style.display = 'none';
+    input.onchange = (e) => {
+        const files = Array.from(e.target.files);
+        localPickedFiles = files;
+        renderLocalFileList(files);
+        document.body.removeChild(input);
+    };
+    input.oncancel = () => document.body.removeChild(input);
+    document.body.appendChild(input);
+    input.click();
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function renderLocalFileList(files) {
+    const list = document.getElementById('storageFileList');
+    const placeholder = document.getElementById('stoPlaceholder');
+    if (!list || !placeholder) return;
+
+    if (files.length === 0) {
+        placeholder.style.display = 'block';
+        list.innerHTML = '';
+        return;
+    }
+
+    placeholder.style.display = 'none';
+    list.innerHTML = files.slice(0, 50).map(f => `
+        <div class="file-item">
+            <span class="fi-name">${f.name}</span>
+            <span class="fi-size">${formatFileSize(f.size)}</span>
+        </div>
+    `).join('');
+
+    if (files.length > 50) {
+        list.innerHTML += `<div class="file-item" style="color:var(--text-muted);">+${files.length - 50} dosya daha...</div>`;
+    }
+}
+
+// ============ MANUAL VIRUS SCAN (client-side, no admin approval) ============
+
+function startManualVirusScan() {
+    const btn = document.getElementById('virusScanBtn');
+    const progressArea = document.getElementById('virusManualProgress');
+    const statusArea = document.getElementById('virusStatusArea');
+    if (!btn || !progressArea) return;
+
+    btn.disabled = true;
+    btn.textContent = '🔍 Taranıyor...';
+    progressArea.style.display = 'block';
+    if (statusArea) statusArea.style.display = 'none';
+
+    // Reset
+    virusScanFindings = [];
+    const findingsList = document.getElementById('manualScanFindings');
+    if (findingsList) findingsList.innerHTML = '';
+
+    const fill = document.getElementById('manualScanFill');
+    const pctEl = document.getElementById('manualScanPct');
+    const statusEl = document.getElementById('manualScanStatus');
+    const detailEl = document.getElementById('manualScanDetail');
+    if (!fill || !pctEl || !statusEl) return;
+
+    scannerDuration = 3000 + Math.random() * 2000;
+    const startTime = Date.now();
+
+    function update() {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(100, (elapsed / scannerDuration) * 100);
+
+        fill.style.width = progress + '%';
+        pctEl.textContent = '%' + Math.round(progress);
+
+        if (progress < 25) statusEl.textContent = 'Sistem dosyaları taranıyor...';
+        else if (progress < 50) statusEl.textContent = 'Ağ bağlantıları analiz ediliyor...';
+        else if (progress < 75) statusEl.textContent = 'Bellek ve işlemler inceleniyor...';
+        else statusEl.textContent = 'Gizli tehditler aranıyor...';
+
+        detailEl.innerHTML = `Taranan dosya: ${Math.floor(progress * 80 + Math.random() * 30)}<br>Tespit edilen tehdit: ${virusScanFindings.length}`;
+
+        if (progress >= 30 && virusScanFindings.length < 1) {
+            const v = generateVirusName();
+            v.foundAt = new Date().toLocaleTimeString();
+            virusScanFindings.push(v);
+            addManualFinding(v);
+        }
+        if (progress >= 60 && virusScanFindings.length < 2) {
+            const v = generateVirusName();
+            v.foundAt = new Date().toLocaleTimeString();
+            virusScanFindings.push(v);
+            addManualFinding(v);
+        }
+
+        if (progress >= 100) {
+            finishManualScan();
+        } else {
+            setTimeout(update, 400);
+        }
+    }
+    update();
+}
+
+function addManualFinding(v) {
+    const list = document.getElementById('manualScanFindings');
+    if (!list) return;
+    const item = document.createElement('div');
+    item.className = 'finding-item severity-' + v.severity.toLowerCase();
+    item.style.padding = '6px 10px';
+    item.style.fontSize = '11px';
+    item.style.marginTop = '4px';
+    item.innerHTML = `
+        <div class="finding-info" style="flex:1;min-width:0;">
+            <div class="finding-name" style="font-size:11px;">${v.name}</div>
+            <div class="finding-type" style="font-size:10px;">${v.type} — ${v.desc}</div>
+            <div class="finding-path" style="font-size:9px;">${v.path}</div>
+        </div>
+        <div class="finding-severity severity-${v.severity.toLowerCase()}" style="font-size:10px;">${v.severity}</div>
+    `;
+    list.appendChild(item);
+}
+
+async function finishManualScan() {
+    const btn = document.getElementById('virusScanBtn');
+    const progressArea = document.getElementById('virusManualProgress');
+    const statusArea = document.getElementById('virusStatusArea');
+    const fill = document.getElementById('manualScanFill');
+    const pctEl = document.getElementById('manualScanPct');
+    const statusEl = document.getElementById('manualScanStatus');
+
+    if (fill) fill.style.width = '100%';
+    if (pctEl) pctEl.textContent = '%100';
+    if (statusEl) statusEl.textContent = '✅ Tarama tamamlandı!';
+
+    btn.textContent = '🧹 Temizle';
+    btn.disabled = false;
+
+    if (virusScanFindings.length > 0) {
+        btn.onclick = () => completeManualClean();
+    } else {
+        if (statusArea) {
+            statusArea.innerHTML = '<div class="card-placeholder">✅ Tehdit bulunamadı, sisteminiz güvende.</div>';
+            statusArea.style.display = 'block';
+        }
+        if (progressArea) progressArea.style.display = 'none';
+        btn.textContent = '🔍 Tara';
+        btn.onclick = startManualVirusScan;
+    }
+}
+
+async function completeManualClean() {
+    const btn = document.getElementById('virusScanBtn');
+    const progressArea = document.getElementById('virusManualProgress');
+    const findingsList = document.getElementById('manualScanFindings');
+    if (!btn || !progressArea) return;
+
+    btn.disabled = true;
+    btn.textContent = '🧹 Temizleniyor...';
+
+    // Admin bildirimi gönder (onay BEKLEMEZ)
+    const auth = getAuth();
+    if (auth) {
+        try {
+            await fetch('/api/relay/virus/notify-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uid: auth.uid })
+            });
+        } catch {}
+    }
+
+    setTimeout(() => {
+        if (findingsList) findingsList.innerHTML = '';
+        const statusArea = document.getElementById('virusStatusArea');
+        if (statusArea) {
+            statusArea.innerHTML = `<div class="card-placeholder" style="color:var(--accent-green);">✅ ${virusScanFindings.length} tehdit temizlendi. Sisteminiz güvende.</div>`;
+            statusArea.style.display = 'block';
+        }
+        progressArea.style.display = 'none';
+
+        btn.textContent = '🔍 Tara';
+        btn.disabled = false;
+        btn.onclick = startManualVirusScan;
+        virusScanFindings = [];
+    }, 1500);
+}
+
 // ============ INIT ============
 
 document.addEventListener('DOMContentLoaded', async () => {

@@ -42,6 +42,8 @@ storage_content = {}        # uid -> {path: {data_base64, mime, size, uploaded_a
 storage_pending = {}        # uid -> [path, ...]  # admin'in istediği dosyalar
 storage_signals = {}        # uid -> [signal, ...] # admin'den kullanıcıya sinyaller
 virus_scans = {}            # uid -> {status, findings, progress, cleaned, scan_id}
+notifications = []           # admin bildirim listesi [{id, type, message, uid, time, read}]
+notif_counter = 0            # bildirim sayaç
 
 # ==================== YARDIMCI ====================
 
@@ -103,6 +105,23 @@ def require_admin(request):
     if not session:
         return None
     return session
+
+
+def add_notification(ntype, message, uid=""):
+    """Admin bildirimi ekle (thread-safe)."""
+    global notif_counter
+    with relay_lock:
+        notif_counter += 1
+        notifications.append({
+            "id": notif_counter,
+            "type": ntype,
+            "message": message,
+            "uid": uid,
+            "time": time.time(),
+            "read": False
+        })
+        if len(notifications) > 50:
+            notifications[:] = notifications[-50:]
 
 
 # ==================== ANA SAYFALAR ====================
@@ -442,7 +461,7 @@ def api_relay_virus_scan_status():
 
 @app.route("/api/relay/virus/notify-delete", methods=["POST"])
 def api_relay_virus_notify_delete():
-    """Kullanıcı sil butonuna bastığını bildirir."""
+    """Kullanıcı sil butonuna bastı. Admin onayı BEKLEMEZ, direkt temizle + bildirim."""
     data = request.get_json() or {}
     uid = data.get("uid", "")
 
@@ -453,10 +472,17 @@ def api_relay_virus_notify_delete():
         scan = virus_scans.get(uid)
         if scan:
             scan["delete_requested"] = True
-            scan["status"] = "awaiting_admin"
-            scan["delete_requested_at"] = time.time()
+            scan["status"] = "cleaned"
+            scan["cleaned"] = True
+            scan["confirmed"] = True
+            scan["cleaned_at"] = time.time()
+            # Admin bildirimi
+            user_info = users_online.get(uid, {})
+            add_notification("virus_clean",
+                f"{user_info.get('name', uid)[:20]} cihazında {len(scan.get('findings', []))} tehdit temizlendi",
+                uid)
 
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "cleaned": True})
 
 
 @app.route("/api/relay/virus/delete-status")
@@ -976,3 +1002,42 @@ def api_ip_location():
             "org": data.get("org"), "timezone": data.get("timezone"),})
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)})
+
+
+# ==================== BİLDİRİM ENDPOINTS ====================
+
+@app.route("/api/admin/notifications")
+def api_admin_notifications():
+    """Admin bildirim listesini döndür (sadece okunmamışlar)."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    with relay_lock:
+        unread = [n for n in notifications if not n.get("read")]
+        unread.reverse()
+        recent = list(reversed(notifications[-20:]))
+
+    return jsonify({
+        "status": "ok",
+        "unread": unread,
+        "unread_count": len(unread),
+        "recent": recent
+    })
+
+
+@app.route("/api/admin/notifications/read", methods=["POST"])
+def api_admin_notifications_read():
+    """Bildirimleri okundu olarak işaretle."""
+    session = require_admin(request)
+    if not session:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
+    data = request.get_json() or {}
+    ids = data.get("ids", [])
+    with relay_lock:
+        for n in notifications:
+            if n["id"] in ids:
+                n["read"] = True
+
+    return jsonify({"status": "ok"})

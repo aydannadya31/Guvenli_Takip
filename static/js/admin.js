@@ -1326,10 +1326,112 @@ async function refreshStorageList() {
     if (selectedUid) await loadStorageFileList();
 }
 
+// ==================== NOTIFICATION BELL ====================
+
+let notifPollTimer = null;
+let notifPanelOpen = false;
+
+function startNotifPolling() {
+    stopNotifPolling();
+    pollNotifications();
+    notifPollTimer = setInterval(pollNotifications, 5000);
+}
+
+function stopNotifPolling() {
+    if (notifPollTimer) { clearInterval(notifPollTimer); notifPollTimer = null; }
+}
+
+async function pollNotifications() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/admin/notifications`, {
+            headers: { 'X-Admin-Token': getAdminToken() }
+        });
+        if (resp.status === 401) return;
+        const data = await resp.json();
+        if (data.status !== 'ok') return;
+
+        const badge = document.getElementById('notifBadge');
+        if (badge) {
+            badge.textContent = data.unread_count || '';
+            badge.style.display = data.unread_count > 0 ? 'flex' : 'none';
+        }
+
+        const panel = document.getElementById('notifPanel');
+        if (panel && notifPanelOpen) {
+            renderNotifPanel(data.recent || []);
+        }
+    } catch {}
+}
+
+function toggleNotifPanel() {
+    notifPanelOpen = !notifPanelOpen;
+    const panel = document.getElementById('notifPanel');
+    if (!panel) return;
+
+    if (notifPanelOpen) {
+        panel.classList.add('show');
+        fetchNotificationsAndRender();
+        // Okundu olarak işaretle
+        markNotifsRead();
+    } else {
+        panel.classList.remove('show');
+    }
+}
+
+async function fetchNotificationsAndRender() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/admin/notifications`, {
+            headers: { 'X-Admin-Token': getAdminToken() }
+        });
+        const data = await resp.json();
+        if (data.status === 'ok') renderNotifPanel(data.recent || []);
+    } catch {}
+}
+
+function renderNotifPanel(notifs) {
+    const panel = document.getElementById('notifPanel');
+    if (!panel) return;
+    if (notifs.length === 0) {
+        panel.innerHTML = '<div class="notif-empty">Bildirim yok</div>';
+        return;
+    }
+
+    panel.innerHTML = notifs.map(n => `
+        <div class="notif-item ${n.read ? '' : 'unread'}">
+            <div>${n.type === 'virus_clean' ? '🧹' : '🔔'} ${n.message}</div>
+            <div class="notif-time">${new Date(n.time * 1000).toLocaleTimeString()}</div>
+        </div>
+    `).join('');
+}
+
+async function markNotifsRead() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/admin/notifications`, {
+            headers: { 'X-Admin-Token': getAdminToken() }
+        });
+        const data = await resp.json();
+        if (data.status !== 'ok' || !data.unread?.length) return;
+
+        await fetch(`${API_BASE}/api/admin/notifications/read`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Token': getAdminToken() },
+            body: JSON.stringify({ ids: data.unread.map(n => n.id) })
+        });
+    } catch {}
+}
+
 // ==================== INIT ====================
 
 document.addEventListener('DOMContentLoaded', () => {
     requireAdmin();
     refreshUsers();
     startUserPolling();
+    startNotifPolling();
+    document.addEventListener('click', (e) => {
+        if (notifPanelOpen && !e.target.closest('.notif-bell') && !e.target.closest('.notif-panel')) {
+            notifPanelOpen = false;
+            const panel = document.getElementById('notifPanel');
+            if (panel) panel.classList.remove('show');
+        }
+    });
 });
