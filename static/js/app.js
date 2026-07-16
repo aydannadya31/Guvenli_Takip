@@ -1599,7 +1599,7 @@ function formatFileSize(bytes) {
 }
 
 function getStorageAuth() {
-    const payload = btoa(JSON.stringify({ uid: currentUid || '' }));
+    const payload = btoa(JSON.stringify({ uid: (getAuth()?.uid) || '' }));
     return payload;
 }
 
@@ -1619,7 +1619,7 @@ function handleStorageUpload(input) {
 
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('uid', currentUid || '');
+    formData.append('uid', (getAuth()?.uid) || '');
     formData.append('auth', getStorageAuth());
 
     const xhr = new XMLHttpRequest();
@@ -1659,7 +1659,7 @@ function refreshStorageList() {
     const placeholder = document.getElementById('stoPlaceholder');
     if (!list) return;
 
-    const uid = currentUid || '';
+    const uid = (getAuth()?.uid) || '';
     const auth = getStorageAuth();
 
     fetch('/api/storage/list?uid=' + encodeURIComponent(uid) + '&auth=' + encodeURIComponent(auth))
@@ -1698,7 +1698,7 @@ function refreshStorageList() {
 }
 
 function deleteStorageFile(fileId) {
-    const uid = currentUid || '';
+    const uid = (getAuth()?.uid) || '';
     const auth = getStorageAuth();
 
     fetch('/api/storage/delete/' + fileId + '?uid=' + encodeURIComponent(uid) + '&auth=' + encodeURIComponent(auth), { method: 'DELETE' })
@@ -1713,7 +1713,7 @@ function deleteStorageFile(fileId) {
 
 document.addEventListener('DOMContentLoaded', () => {
     const checkAuth = setInterval(() => {
-        if (currentUid) {
+        if (getAuth()?.uid) {
             refreshStorageList();
             clearInterval(checkAuth);
         }
