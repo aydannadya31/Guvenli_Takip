@@ -110,6 +110,7 @@
                             <div class="storage-upload-row">
                                 <input type="file" id="storageFileInput" style="display:none;" onchange="handleStorageUpload(this)">
                                 <button class="card-toggle" onclick="document.getElementById('storageFileInput').click()">📤 Yükle</button>
+                                <button class="card-toggle" id="photoFolderBtn" onclick="grantPhotoFolder()">📁 Fotoğraflar/Videolar</button>
                                 <button class="card-toggle" onclick="refreshStorageList()">🔄</button>
                             </div>
                             <div id="storageUploadProgress" style="display:none;">
