@@ -1081,6 +1081,7 @@ function renderModuleStorage() {
                 <button class="btn btn-sm btn-secondary" onclick="setStorageFilter('photos', this)">Fotograflar</button>
                 <button class="btn btn-sm btn-secondary" onclick="setStorageFilter('videos', this)">Videolar</button>
                 <button class="btn btn-sm btn-secondary" onclick="selectAllAdminStorage()">Tumunu Sec</button>
+                <button class="btn btn-sm btn-primary" onclick="downloadSelectedAdminFiles()">Secilenleri Indir</button>
                 <button class="btn btn-sm btn-danger" onclick="deleteSelectedAdminFiles()">Secilenleri Sil</button>
                 <span class="storage-status" id="storageStatus">Dosyalar bekleniyor...</span>
             </div>
@@ -1211,6 +1212,27 @@ function deleteSelectedAdminFiles() {
         deleted = results.filter(r => r.status === 'ok').length;
         if (st) st.textContent = deleted + ' dosya silindi';
         loadAdminStorageFiles();
+    });
+}
+
+function downloadSelectedAdminFiles() {
+    const cbs = document.querySelectorAll('.admin-file-checkbox:checked');
+    const fileIds = Array.from(cbs).map(cb => cb.dataset.fileid).filter(Boolean);
+    if (fileIds.length === 0) return;
+
+    const st = document.getElementById('storageStatus');
+    if (st) st.textContent = fileIds.length + ' dosya indiriliyor...';
+
+    const token = encodeURIComponent(getAdminToken());
+    fileIds.forEach((fid, i) => {
+        setTimeout(() => {
+            const a = document.createElement('a');
+            a.href = '/api/admin/storage/download/' + fid + '?token=' + token;
+            a.download = '';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        }, i * 300);
     });
 }
 
